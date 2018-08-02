@@ -3,7 +3,7 @@ const Client = require("@octokit/rest");
 const vsts = require("vso-node-api");
 
 module.exports = async function (context, data) {
-    if (data.comment && data.comment.body && data.pull_request && matchesCommand(data.comment.body)) {
+    if (data.action === "created" && data.comment && data.comment.body && data.pull_request && matchesCommand(data.comment.body)) {
         const requestingUserStatus = data.comment.user.author_association;
         if (requestingUserStatus !== "MEMBER" && requestingUserStatus !== "OWNER" && requestingUserStatus !== "COLLABORATOR") {
             return context.done(); // Only trigger for MS members/repo owners/invited collaborators

@@ -1,5 +1,5 @@
 {
-  "azureFunctions.projectRuntime": "~1",
+  "azureFunctions.projectRuntime": "beta",
   "azureFunctions.projectLanguage": "JavaScript",
   "azureFunctions.templateFilter": "Verified"
 }
