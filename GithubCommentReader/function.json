@@ -3,8 +3,8 @@
     {
       "type": "httpTrigger",
       "direction": "in",
-      "webHookType": "github",
-      "name": "req"
+      "name": "req",
+      "authLevel": "anonymous"
     },
     {
       "type": "http",
