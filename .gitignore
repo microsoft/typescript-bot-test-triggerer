@@ -4,6 +4,7 @@ csx
 .vs
 edge
 Publish
+node_modules
 
 *.user
 *.suo

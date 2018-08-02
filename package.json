@@ -1,0 +1,16 @@
+{
+  "name": "githubcommenthandler",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "SEE LICENSE IN ASSOCIATED REPO",
+  "dependencies": {
+    "@octokit/rest": "^15.9.5",
+    "vso-node-api": "^6.5.0"
+  }
+}
