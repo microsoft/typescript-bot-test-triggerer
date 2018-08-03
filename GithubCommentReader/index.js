@@ -48,7 +48,7 @@ module.exports = async function (context, data) {
         definition: { id: 11 },
         queue: { id: 8 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
+        sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
         sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
         parameters: JSON.stringify({ status_comment: commentId }) // This API is real bad
     }), "TypeScript");
