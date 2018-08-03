@@ -33,7 +33,6 @@ module.exports = async function (context, data) {
     const refSha = pr.head.sha;
     const branch = pr.head.ref;
     const originUrl = pr.head.repo.git_url;
-    context.log(originUrl);
     const requestingUser = request.comment.user.login;
     const result = await cli.issues.createComment({
         body: `Heya @${requestingUser}, I'm starting to run the extended test suite on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
@@ -49,9 +48,9 @@ module.exports = async function (context, data) {
         definition: { id: 11 },
         queue: { id: 8 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: isLocalBranch ? branch : "master", // Undocumented, but used by the official frontend
-        sourceVersion: isLocalBranch ? refSha : "", // Also undocumented
-        parameters: JSON.stringify(isLocalBranch ? { status_comment: commentId } : { pr_id: pr.number, remote_url: originUrl, remote_branch: branch, remote_sha: refSha, status_comment: commentId }) // This API is garbage
+        sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
+        sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
+        parameters: JSON.stringify({ status_comment: commentId }) // This API is real bad
     }), "TypeScript");
     await cli.issues.editComment({
         owner: "Microsoft",
