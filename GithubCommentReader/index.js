@@ -50,7 +50,7 @@ module.exports = async function (context, data) {
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
         sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
-        parameters: JSON.stringify({ status_comment: commentId }) // This API is real bad
+        parameters: JSON.stringify({ status_comment: commentId, source_issue: pr.number }) // This API is real bad
     }), "TypeScript");
     await cli.issues.editComment({
         owner: "Microsoft",
