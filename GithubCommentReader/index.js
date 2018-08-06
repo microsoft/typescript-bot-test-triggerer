@@ -65,5 +65,5 @@ module.exports = async function (context, data) {
  * @param {string} body 
  */
 function matchesCommand(body) {
-    return body === "@typescript-bot test this";
+    return body && body.indexOf("@typescript-bot test this") >= 0;
 }
