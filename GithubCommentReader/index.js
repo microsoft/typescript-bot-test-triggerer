@@ -57,7 +57,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId) {
     const isLocalBranch = originUrl === "git://github.com/Microsoft/TypeScript.git";
     const buildQueue = await build.queueBuild(/** @type {*} */({
         definition: { id: definitionId },
-        queue: { id: 8 },
+        queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
         sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
