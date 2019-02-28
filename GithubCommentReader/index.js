@@ -46,7 +46,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId) {
     const originUrl = pr.head.repo.git_url;
     const requestingUser = request.comment.user.login;
     const result = await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} test suite on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
+        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
         number: pr.number,
         owner: "Microsoft",
         repo: "TypeScript"
@@ -67,13 +67,14 @@ async function makeNewBuildWithComments(request, suiteName, definitionId) {
         owner: "Microsoft",
         repo: "TypeScript",
         comment_id: commentId,
-        body: `Heya @${requestingUser}, I've started to run the ${suiteName} test suite on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}). It should now contribute to this PR's status checks.`
+        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}). It should now contribute to this PR's status checks.`
     });
 }
 
 const commands = {
-    ["test this"]: async request => await makeNewBuildWithComments(request, "extended", 11),
-    ["run dt"]: async request => await makeNewBuildWithComments(request, "Definitely Typed", 18),
+    ["test this"]: async request => await makeNewBuildWithComments(request, "extended test suite", 11),
+    ["run dt"]: async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18),
+    ["pack this"]: async request => await makeNewBuildWithComments(request, "tarball bundle task", 19)
 }
 
 module.exports = async function (context, data) {
