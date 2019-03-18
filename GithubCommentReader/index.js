@@ -74,7 +74,8 @@ async function makeNewBuildWithComments(request, suiteName, definitionId) {
 const commands = {
     ["test this"]: async request => await makeNewBuildWithComments(request, "extended test suite", 11),
     ["run dt"]: async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18),
-    ["pack this"]: async request => await makeNewBuildWithComments(request, "tarball bundle task", 19)
+    ["pack this"]: async request => await makeNewBuildWithComments(request, "tarball bundle task", 19),
+    ["perf test"]: async request => await makeNewBuildWithComments(request, "perf test suite", 21),
 }
 
 module.exports = async function (context, data) {
