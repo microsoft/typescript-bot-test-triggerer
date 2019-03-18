@@ -37,8 +37,9 @@ function getVSTSClient() {
  * @param {*} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {number} queueId The VSTS id of the queue to build the pipeline on (defaults to 11 - hosted linux)
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId) {
+async function makeNewBuildWithComments(request, suiteName, definitionId, queueId = 11) {
     const cli = getGHClient();
     const pr = request.pull_request || (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
     const refSha = pr.head.sha;
@@ -57,7 +58,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId) {
     const isLocalBranch = originUrl === "git://github.com/Microsoft/TypeScript.git";
     const buildQueue = await build.queueBuild(/** @type {*} */({
         definition: { id: definitionId },
-        queue: { id: 11 },
+        queue: { id: queueId },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
         sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
@@ -75,7 +76,7 @@ const commands = {
     ["test this"]: async request => await makeNewBuildWithComments(request, "extended test suite", 11),
     ["run dt"]: async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18),
     ["pack this"]: async request => await makeNewBuildWithComments(request, "tarball bundle task", 19),
-    ["perf test"]: async request => await makeNewBuildWithComments(request, "perf test suite", 21),
+    ["perf test"]: async request => await makeNewBuildWithComments(request, "perf test suite", 21, 22),
 }
 
 module.exports = async function (context, data) {
