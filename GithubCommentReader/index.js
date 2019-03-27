@@ -32,14 +32,31 @@ function getVSTSClient() {
 }
 
 /**
+ * @typedef {{
+ *   definition: {
+ *       id: number;
+ *   };
+ *   queue: {
+ *       id: number;
+ *   };
+ *   project: {
+ *       id: string;
+ *   };
+ *   sourceBranch: string;
+ *   sourceVersion: string;
+ *   parameters: string;
+ * }} BuildVars
+ */
+
+/**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
  * and update the comment with the build log URL.
  * @param {*} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
- * @param {number} queueId The VSTS id of the queue to build the pipeline on (defaults to 11 - hosted linux)
+ * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId, queueId = 11) {
+async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p) {
     const cli = getGHClient();
     const pr = request.pull_request || (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
     const refSha = pr.head.sha;
@@ -56,14 +73,14 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, queueI
     const vcli = getVSTSClient(); 
     const build = await vcli.getBuildApi();
     const isLocalBranch = originUrl === "git://github.com/Microsoft/TypeScript.git";
-    const buildQueue = await build.queueBuild(/** @type {*} */({
+    const buildQueue = await build.queueBuild(/** @type {*} */(await buildTriggerAugmentor({
         definition: { id: definitionId },
-        queue: { id: queueId },
+        queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
         sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
         parameters: JSON.stringify({ status_comment: commentId, source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
-    }), "TypeScript");
+    })), "TypeScript");
     await cli.issues.editComment({
         owner: "Microsoft",
         repo: "TypeScript",
@@ -72,12 +89,19 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, queueI
     });
 }
 
-const commands = {
-    ["test this"]: async request => await makeNewBuildWithComments(request, "extended test suite", 11),
-    ["run dt"]: async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18),
-    ["pack this"]: async request => await makeNewBuildWithComments(request, "tarball bundle task", 19),
-    ["perf test"]: async request => await makeNewBuildWithComments(request, "perf test suite", 22, 22),
-}
+const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => Promise<void>>} */(new Map()))
+    .set(/test this/, async request => await makeNewBuildWithComments(request, "extended test suite", 11))
+    .set(/run dt/, async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18))
+    .set(/pack this/, async request => await makeNewBuildWithComments(request, "tarball bundle task", 19))
+    .set(/perf test/, async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }})))
+    .set(/run dt x(\d+)/, async (request, captures) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
+        ...p,
+        parameters: JSON.stringify({
+            ...JSON.parse(p.parameters),
+            DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha,
+            parallelism: parseInt(captures[1]) || 4
+        })
+    })));
 
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
@@ -120,10 +144,10 @@ function matchesCommand(context, body) {
     }
     /** @type {((req: any) => Promise<void>)[]} */
     let results = [];
-    for (const key in commands) {
-        if (!commands.hasOwnProperty(key)) continue;
-        if (body.indexOf(`${botCall} ${key}`) >= 0) {
-            results.push(commands[key]);
+    for (const [key, action] of commands.entries()) {
+        const fullRe = new RegExp(`${botCall} ${key.source}($|\s)`, "i");
+        if (fullRe.test(body)) {
+            results.push(r => action(r, fullRe.exec(body)));
         }
     }
     if (!results.length) {
