@@ -91,7 +91,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
 
 const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => Promise<void>>} */(new Map()))
     .set(/test this/, async request => await makeNewBuildWithComments(request, "extended test suite", 11))
-    .set(/run dt/, async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18))
+    .set(/run dt (?! faster)/, async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18))
     .set(/pack this/, async request => await makeNewBuildWithComments(request, "tarball bundle task", 19))
     .set(/perf test/, async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }})))
     .set(/run dt faster/, async request => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
@@ -144,7 +144,7 @@ function matchesCommand(context, body) {
     /** @type {((req: any) => Promise<void>)[]} */
     let results = [];
     for (const [key, action] of commands.entries()) {
-        const fullRe = new RegExp(`${botCall} ${key.source}($|\s)`, "i");
+        const fullRe = new RegExp(`${botCall} ${key.source}\b`, "i");
         if (fullRe.test(body)) {
             results.push(r => action(r, fullRe.exec(body)));
         }
