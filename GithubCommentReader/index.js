@@ -138,13 +138,13 @@ function matchesCommand(context, body) {
         return undefined;
     }
     const botCall = "@typescript-bot";
-    if (body.indexOf(botCall)) {
+    if (body.indexOf(botCall) !== -1) {
         context.log(`Bot reference detected ${body}`);
     }
     /** @type {((req: any) => Promise<void>)[]} */
     let results = [];
     for (const [key, action] of commands.entries()) {
-        const fullRe = new RegExp(`${botCall} ${key.source}\b`, "i");
+        const fullRe = new RegExp(`${botCall} ${key.source}`, "i");
         if (fullRe.test(body)) {
             results.push(r => action(r, fullRe.exec(body)));
         }
