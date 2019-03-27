@@ -94,12 +94,11 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
     .set(/run dt/, async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18))
     .set(/pack this/, async request => await makeNewBuildWithComments(request, "tarball bundle task", 19))
     .set(/perf test/, async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }})))
-    .set(/run dt x(\d+)/, async (request, captures) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
+    .set(/run dt faster/, async request => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
         ...p,
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
-            DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha,
-            parallelism: parseInt(captures[1]) || 4
+            DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
         })
     })));
 
