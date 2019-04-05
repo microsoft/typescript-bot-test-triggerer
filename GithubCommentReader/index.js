@@ -100,7 +100,17 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
             ...JSON.parse(p.parameters),
             DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
         })
-    })));
+    })))
+    .set(/user test this/, async request => await makeNewBuildWithComments(request, "community code test suite", 24, async p => {
+        const cli = getGHClient();
+        const pr = request.pull_request || (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
+
+        return {...p, parameters: JSON.stringify({
+            ...JSON.parse(p.parameters),
+            target_fork: pr.repo.full_name.split("/")[0],
+            target_branch: pr.head.ref
+        })};
+    }));
 
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
