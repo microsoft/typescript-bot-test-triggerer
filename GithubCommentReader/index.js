@@ -58,10 +58,8 @@ function getVSTSClient() {
  */
 async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p) {
     const cli = getGHClient();
-    const pr = request.pull_request || (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
+    const pr = (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
     const refSha = pr.head.sha;
-    const branch = pr.head.ref;
-    const originUrl = pr.head.repo.git_url;
     const requestingUser = request.comment.user.login;
     const result = await cli.issues.createComment({
         body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
@@ -70,23 +68,70 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         repo: "TypeScript"
     });
     const commentId = result.data.id;
-    const vcli = getVSTSClient(); 
-    const build = await vcli.getBuildApi();
-    const isLocalBranch = originUrl === "git://github.com/Microsoft/TypeScript.git";
-    const buildQueue = await build.queueBuild(/** @type {*} */(await buildTriggerAugmentor({
-        definition: { id: definitionId },
-        queue: { id: 11 },
-        project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
-        sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
-        parameters: JSON.stringify({ status_comment: commentId, source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
-    })), "TypeScript");
+    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({...p, parameters: JSON.stringify({...JSON.parse(p.parameters), status_comment: commentId})}));
     await cli.issues.editComment({
         owner: "Microsoft",
         repo: "TypeScript",
         comment_id: commentId,
         body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}). It should now contribute to this PR's status checks.`
     });
+}
+
+/**
+ * Authenticate with vsts and schedule the build
+ * @param {*} request The request object
+ * @param {*} pr The gihtub PR data object
+ * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ */
+async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p) {
+    const vcli = getVSTSClient(); 
+    const build = await vcli.getBuildApi();
+    const branch = pr.head.ref;
+    const originUrl = pr.head.repo.git_url;
+    const isLocalBranch = originUrl === "git://github.com/Microsoft/TypeScript.git";
+    const requestingUser = request.comment.user.login;
+    const refSha = pr.head.sha;
+    return await build.queueBuild(/** @type {*} */(await buildTriggerAugmentor({
+        definition: { id: definitionId },
+        queue: { id: 11 },
+        project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
+        sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
+        sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
+        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
+    })), "TypeScript");
+}
+
+/**
+ * @param {*} request 
+ * @param {string} targetBranch 
+ */
+async function makeCherryPickPR(request, targetBranch) {
+    const cli = getGHClient();
+    const pr = (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
+    try {
+        await cli.gitdata.getReference({
+            owner: "Microsoft",
+            repo: "Microsoft",
+            ref: `heads/${targetBranch}`
+        });
+    }
+    catch (_) {
+        const requestingUser = request.comment.user.login;
+        await cli.issues.createComment({
+            body: `Heya @${requestingUser}, I couldn't find the branch '${targetBranch}' on Microsoft/TypeScript. You may need to make it and try again.`,
+            number: pr.number,
+            owner: "Microsoft",
+            repo: "TypeScript"
+        });
+    }
+    await triggerBuild(request, pr, 30, p => ({
+        ...p,
+        parameters: JSON.stringify({
+            ...JSON.parse(p.parameters),
+            target_branch: targetBranch
+        })
+    }));
 }
 
 const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => Promise<void>>} */(new Map()))
@@ -110,7 +155,8 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
             target_fork: pr.head.repo.owner.login,
             target_branch: pr.head.ref
         })};
-    }));
+    }))
+    .set(/cherry-pick to (\S+)/, async (request, match) => await makeCherryPickPR(request, match[1]));
 
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
