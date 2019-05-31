@@ -124,6 +124,7 @@ async function makeCherryPickPR(request, targetBranch) {
             owner: "Microsoft",
             repo: "TypeScript"
         });
+        return;
     }
     await triggerBuild(request, pr, 30, p => ({
         ...p,
