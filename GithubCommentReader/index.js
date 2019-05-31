@@ -157,7 +157,7 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
             target_branch: pr.head.ref
         })};
     }))
-    .set(/cherry-pick to (\S+)/, async (request, match) => await makeCherryPickPR(request, match[1]));
+    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)/, async (request, match) => await makeCherryPickPR(request, match[1]));
 
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
