@@ -112,7 +112,7 @@ async function makeCherryPickPR(request, targetBranch) {
     try {
         await cli.gitdata.getReference({
             owner: "Microsoft",
-            repo: "Microsoft",
+            repo: "TypeScript",
             ref: `heads/${targetBranch}`
         });
     }
