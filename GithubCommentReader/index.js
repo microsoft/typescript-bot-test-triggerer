@@ -147,7 +147,7 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
             DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
         })
     })))
-    .set(/user test this(?! faster)/, async request => await makeNewBuildWithComments(request, "community code test suite", 24, async p => {
+    .set(/user test this slower/, async request => await makeNewBuildWithComments(request, "community code test suite", 24, async p => {
         const cli = getGHClient();
         const pr = (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
 
@@ -157,7 +157,7 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
             target_branch: pr.head.ref
         })};
     }))
-    .set(/user test this faster/, async request => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, async p => {
+    .set(/user test this(?! slower)/, async request => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, async p => {
         const cli = getGHClient();
         const pr = (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
 
