@@ -105,9 +105,9 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
 /**
  * @param {*} request
  * @param {string} targetBranch
- * @param {boolean} performLKG
+ * @param {boolean} produceLKG
  */
-async function makeCherryPickPR(request, targetBranch, performLKG) {
+async function makeCherryPickPR(request, targetBranch, produceLKG) {
     const cli = getGHClient();
     const pr = (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
     try {
@@ -132,7 +132,7 @@ async function makeCherryPickPR(request, targetBranch, performLKG) {
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
             target_branch: targetBranch,
-            performLKG
+            ...(produceLKG ? {produceLKG: "true"} : {})
         })
     }));
 }
