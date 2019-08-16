@@ -103,10 +103,11 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
 }
 
 /**
- * @param {*} request 
- * @param {string} targetBranch 
+ * @param {*} request
+ * @param {string} targetBranch
+ * @param {boolean} performLKG
  */
-async function makeCherryPickPR(request, targetBranch) {
+async function makeCherryPickPR(request, targetBranch, performLKG) {
     const cli = getGHClient();
     const pr = (await cli.pullRequests.get({ number: request.issue.number, owner: "Microsoft", repo: "TypeScript" })).data;
     try {
@@ -130,7 +131,8 @@ async function makeCherryPickPR(request, targetBranch) {
         ...p,
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
-            target_branch: targetBranch
+            target_branch: targetBranch,
+            performLKG
         })
     }));
 }
@@ -167,7 +169,7 @@ const commands = (/** @type {Map<RegExp, (req: any, match?: RegExpExecArray) => 
             target_branch: pr.head.ref
         })};
     }))
-    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)/, async (request, match) => await makeCherryPickPR(request, match[1]));
+    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)(and LKG)?/, async (request, match) => await makeCherryPickPR(request, match[1], !!match[2]));
 
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
