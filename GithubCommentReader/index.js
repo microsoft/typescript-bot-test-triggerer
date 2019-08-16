@@ -132,7 +132,7 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
             target_branch: targetBranch,
-            ...(produceLKG ? {produceLKG: "true"} : {})
+            ...(produceLKG ? {PRODUCE_LKG: "true"} : {})
         })
     }));
 }
