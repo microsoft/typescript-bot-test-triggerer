@@ -87,17 +87,13 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
 async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p) {
     const vcli = getVSTSClient(); 
     const build = await vcli.getBuildApi();
-    const branch = pr.head.ref;
-    const originUrl = pr.head.repo.git_url;
-    const isLocalBranch = originUrl === "git://github.com/Microsoft/TypeScript.git";
     const requestingUser = request.comment.user.login;
-    const refSha = pr.head.sha;
     return await build.queueBuild(/** @type {*} */(await buildTriggerAugmentor({
         definition: { id: definitionId },
         queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: isLocalBranch ? branch : `refs/pull/${pr.number}/head`, // Undocumented, but used by the official frontend
-        sourceVersion: isLocalBranch ? refSha : ``, // Also undocumented
+        sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
+        sourceVersion: ``, // Also undocumented
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
     })), "TypeScript");
 }
