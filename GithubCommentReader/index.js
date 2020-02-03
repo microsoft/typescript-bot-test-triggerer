@@ -125,9 +125,9 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
     }
     await triggerBuild(request, pr, 30, p => ({
         ...p,
+        sourceBranch: `refs/pull/${pr.number}/head`,
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
-            sourceBranch: `refs/pull/${pr.number}/head`,
             target_branch: targetBranch,
             ...(produceLKG ? {PRODUCE_LKG: "true"} : {})
         })
