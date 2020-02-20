@@ -155,7 +155,7 @@ async function triggerGHActionWithComment(request, event, payload, message) {
     });
     const requestingUser = request.comment.user.login;
     await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I've started to run ${message} for you. [Here's the link to my best guess at the log](${workflow.data.workflow_runs[0].html_url}).`,
+        body: `Heya @${requestingUser}, I've started to ${message} for you. [Here's the link to my best guess at the log](${workflow.data.workflow_runs[0].html_url}).`,
         issue_number: request.issue.number,
         owner: "microsoft",
         repo: "TypeScript"
@@ -283,7 +283,68 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             core_major_minor: match[1],
             core_tag: "beta",
             branch_name: targetBranch
-        }, `the task to create the \`${targetBranch}\` branch`);
+        }, `create the \`${targetBranch}\` branch`);
+    }, undefined, false))
+    .set(/bump release-([\d\.]+)/, action(async (request, match) => {
+        const cli = getGHClient();
+        const targetBranch = `release-${match[1]}`;
+        const requestingUser = request.comment.user.login;
+        try {
+            await cli.git.getRef({
+                owner: "Microsoft",
+                repo: "TypeScript",
+                ref: `heads/${targetBranch}`
+            });
+        }
+        catch (_) {
+            // Branch does not exist
+            await cli.issues.createComment({
+                body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to exist on microsoft/TypeScript.`,
+                issue_number: request.issue.number,
+                owner: "Microsoft",
+                repo: "TypeScript"
+            });
+            return;
+        }
+        const contentResponse = await cli.repos.getContents({
+            owner: "microsoft",
+            repo: "TypeScript",
+            ref: targetBranch,
+            path: "package.json"
+        });
+        if (Array.isArray(contentResponse.data) || !contentResponse.data.content) {
+            await cli.issues.createComment({
+                body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to have a \`package.json\` I can look up its current version in.`,
+                issue_number: request.issue.number,
+                owner: "Microsoft",
+                repo: "TypeScript"
+            });
+            return;
+        }
+        /** @type {string} */
+        let currentVersion;
+        try {
+            const packageContent = JSON.parse(btoa(contentResponse.data.content));
+            currentVersion = packageContent.version;
+        }
+        catch (_) {
+            await cli.issues.createComment({
+                body: `Heya @${requestingUser}, the branch '${targetBranch}' had a \`package.json\`, but it didn't seem to be valid JSON.`,
+                issue_number: request.issue.number,
+                owner: "Microsoft",
+                repo: "TypeScript"
+            });
+            return;
+        }
+        const parts = currentVersion.split(".");
+        const majorMinor = parts.slice(0, 2).join(".");
+        // > X.X.0-beta -> X.X.1-rc -> X.X.2 -> X.X.3
+        const new_version = `${majorMinor}.${currentVersion.indexOf("beta") >= 0 ? "1-rc" : currentVersion.indexOf("rc") >= 0 ? "2" : (parts[2] + 1)}`;
+        await triggerGHActionWithComment(request, "set-version", {
+            package_version: new_version,
+            core_major_minor: majorMinor,
+            branch_name: targetBranch
+        }, `update the version number on \`${targetBranch}\` to \`${new_version}\``);
     }, undefined, false));
 
 module.exports = async function (context, data) {
