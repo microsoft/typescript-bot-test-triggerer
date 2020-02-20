@@ -136,8 +136,8 @@ async function sleep(duration) {
 
 /**
  * @param {any} request
- * @param {string} event 
- * @param {object} payload 
+ * @param {string} event
+ * @param {object} payload
  */
 async function triggerGHActionWithComment(request, event, payload, message) {
     const cli = getGHClient();
@@ -252,12 +252,39 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         })};
     })))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
-    .set(/create release-([\d\.]+)/, action(async (request, match) => await triggerGHActionWithComment(request, "new-release-branch", {
-        package_version: `${match[1]}.0-beta`,
-        core_major_minor: match[1],
-        core_tag: "beta",
-        branch_name: `release-${match[1]}`
-    }, `the task to create the \`release-${match[1]}\` branch`), undefined, false));
+    .set(/create release-([\d\.]+)/, action(async (request, match) => {
+        const cli = getGHClient();
+        const targetBranch = `release-${match[1]}`;
+        let targetBranchExists = false;
+        try {
+            await cli.git.getRef({
+                owner: "Microsoft",
+                repo: "TypeScript",
+                ref: `heads/${targetBranch}`
+            });
+            targetBranchExists = true;
+        }
+        catch (_) {
+            // OK, we expect an error
+        }
+        if (targetBranchExists) {
+            // If there's no error, call it off, the branch already exists
+            const requestingUser = request.comment.user.login;
+            await cli.issues.createComment({
+                body: `Heya @${requestingUser}, the branch '${targetBranch}' already seems to exist on microsoft/TypeScript. You should prepare it for the release by hand.`,
+                issue_number: request.issue.number,
+                owner: "Microsoft",
+                repo: "TypeScript"
+            });
+            return;
+        }
+        await triggerGHActionWithComment(request, "new-release-branch", {
+            package_version: `${match[1]}.0-beta`,
+            core_major_minor: match[1],
+            core_tag: "beta",
+            branch_name: targetBranch
+        }, `the task to create the \`${targetBranch}\` branch`);
+    }, undefined, false));
 
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
