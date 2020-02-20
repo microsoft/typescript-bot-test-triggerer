@@ -141,7 +141,7 @@ async function triggerGHActionWithComment(request, event, payload, message) {
     });
     const requestingUser = request.comment.user.login;
     await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I've started to run ${message} for you. [Here's the link to my best guess at the log](${workflow.data.workflow_runs[0].logs_url}).`,
+        body: `Heya @${requestingUser}, I've started to run ${message} for you. [Here's the link to my best guess at the log](${workflow.data.workflow_runs[0].html_url}).`,
         issue_number: request.issue.number,
         owner: "microsoft",
         repo: "TypeScript"
