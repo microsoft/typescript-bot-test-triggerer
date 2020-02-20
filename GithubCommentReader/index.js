@@ -126,6 +126,15 @@ async function triggerGHAction(request, event, payload) {
 }
 
 /**
+ * @param {number} duration - in seconds
+ */
+async function sleep(duration) {
+    return new Promise(r => {
+        setTimeout(r, duration * 1000);
+    });
+}
+
+/**
  * @param {any} request
  * @param {string} event 
  * @param {object} payload 
@@ -133,6 +142,11 @@ async function triggerGHAction(request, event, payload) {
 async function triggerGHActionWithComment(request, event, payload, message) {
     const cli = getGHClient();
     await triggerGHAction(request, event, payload);
+    await sleep(2);
+    // we sleep because it takes a bit for the triggered event to cause a new run to appear
+    // this improves our odds of findings the new run, rather than the old one
+    // TODO: If GH ever makes the `repository_dispatch` event actually return the scheduled jobs,
+    // use that info here
     const workflow = await cli.actions.listRepoWorkflowRuns({
         owner: "microsoft", 
         repo: "TypeScript",
