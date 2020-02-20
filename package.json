@@ -10,7 +10,7 @@
   "author": "",
   "license": "SEE LICENSE IN ASSOCIATED REPO",
   "dependencies": {
-    "@octokit/rest": "^15.9.5",
+    "@octokit/rest": "^16",
     "vso-node-api": "^6.5.0"
   }
 }
