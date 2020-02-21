@@ -345,6 +345,12 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             core_major_minor: majorMinor,
             branch_name: targetBranch
         }, `update the version number on \`${targetBranch}\` to \`${new_version}\``);
+    }, undefined, false))
+    .set(/sync release-([\d\.]+)/, action(async (request, match) => {
+        const branch = `release-${match[1]}`;
+        await triggerGHActionWithComment(request, "sync-branch", {
+            branch_name: branch
+        }, `sync \`${branch}\` with master`);
     }, undefined, false));
 
 module.exports = async function (context, data) {
