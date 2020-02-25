@@ -187,7 +187,7 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
         });
         return;
     }
-    await triggerBuild(request, pr, 30, p => ({
+    await makeNewBuildWithComments(request, `task to cherry-pick this into \`${targetBranch}\``, 30, p => ({
         ...p,
         sourceBranch: `refs/pull/${pr.number}/head`,
         parameters: JSON.stringify({
