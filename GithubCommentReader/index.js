@@ -73,7 +73,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         owner: "microsoft",
         repo: "TypeScript",
         comment_id: commentId,
-        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}). It should now contribute to this PR's status checks.`
+        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}).`
     });
 }
 
