@@ -324,7 +324,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         /** @type {string} */
         let currentVersion;
         try {
-            const packageContent = JSON.parse(btoa(contentResponse.data.content));
+            const packageContent = JSON.parse(Buffer.from(contentResponse.data.content, "base64").toString("utf-8"));
             currentVersion = packageContent.version;
         }
         catch (_) {
