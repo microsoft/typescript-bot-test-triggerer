@@ -339,7 +339,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         const parts = currentVersion.split(".");
         const majorMinor = parts.slice(0, 2).join(".");
         // > X.X.0-beta -> X.X.1-rc -> X.X.2 -> X.X.3
-        const new_version = `${majorMinor}.${currentVersion.indexOf("beta") >= 0 ? "1-rc" : currentVersion.indexOf("rc") >= 0 ? "2" : (parts[2] + 1)}`;
+        const new_version = `${majorMinor}.${currentVersion.indexOf("beta") >= 0 ? "1-rc" : currentVersion.indexOf("rc") >= 0 ? "2" : (Number(parts[2]) + 1)}`;
         await triggerGHActionWithComment(request, "set-version", {
             package_version: new_version,
             core_major_minor: majorMinor,
