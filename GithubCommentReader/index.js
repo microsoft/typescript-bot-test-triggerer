@@ -351,6 +351,11 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         await triggerGHActionWithComment(request, "sync-branch", {
             branch_name: branch
         }, `sync \`${branch}\` with master`);
+    }, undefined, false))
+    .set(/run repros/, action(async (request, match) => {
+        const issueNumber = request.issue && request.issue.number 
+        const prNumber = request.pull_request && request.pull_request.number 
+        await triggerGHActionWithComment(request, "run-twoslash-repros", { number: issueNumber || prNumber || undefined }, `run the code sample repros`);
     }, undefined, false));
 
 module.exports = async function (context, data) {
