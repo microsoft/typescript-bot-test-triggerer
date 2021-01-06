@@ -223,7 +223,8 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/test this/, action(async request => await makeNewBuildWithComments(request, "extended test suite", 11)))
     .set(/run dt slower/, action(async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18)))
     .set(/pack this/, action(async request => await makeNewBuildWithComments(request, "tarball bundle task", 19)))
-    .set(/perf test/, action(async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }}))))
+    .set(/perf test(?! faster)/, action(async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }}))))
+    .set(/perf test faster/, action(async request => await makeNewBuildWithComments(request, "abridged perf test suite", 45, p => ({...p, queue: { id: 22 }}))))
     .set(/run dt(?! slower)/, action(async request => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
         ...p,
         parameters: JSON.stringify({
