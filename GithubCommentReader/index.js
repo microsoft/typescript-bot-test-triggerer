@@ -161,7 +161,7 @@ async function triggerGHActionWithComment(request, event, payload, message) {
     const workflow = await cli.actions.listRepoWorkflowRuns({
         owner: "microsoft", 
         repo: "TypeScript",
-        branch: "master",
+        branch: "main",
         event: "repository_dispatch"
     });
     const requestingUser = request.comment.user.login;
@@ -253,7 +253,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this(?! slower|inline)/, action(async request => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, async p => {
+    .set(/user test this(?! slower| inline)/, action(async request => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -377,7 +377,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         const branch = `release-${match[1]}`;
         await triggerGHActionWithComment(request, "sync-branch", {
             branch_name: branch
-        }, `sync \`${branch}\` with master`);
+        }, `sync \`${branch}\` with main`);
     }, undefined, false))
     .set(/run repros/, action(async (request, match) => {
         const issueNumber = request.issue && request.issue.number 
