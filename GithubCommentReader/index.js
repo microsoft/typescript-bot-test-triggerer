@@ -66,8 +66,9 @@ function getVSTSDevDivClient() {
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  * @param {vsts.WebApi} [client] The VSTS client to use.
+ * @param {string} [project] The VSTS project to use.
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p, client) {
+async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p, client, project) {
     const cli = getGHClient();
     const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
     const refSha = pr.head.sha;
@@ -79,7 +80,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         repo: "TypeScript"
     });
     const commentId = result.data.id;
-    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({...p, parameters: JSON.stringify({...JSON.parse(p.parameters), status_comment: commentId})}), client);
+    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({...p, parameters: JSON.stringify({...JSON.parse(p.parameters), status_comment: commentId})}), client, project);
     await cli.issues.updateComment({
         owner: "microsoft",
         repo: "TypeScript",
@@ -94,8 +95,10 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
  * @param {*} pr The gihtub PR data object
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ * @param {vsts.WebApi} [client] The VSTS client to use.
+ * @param {string} [project] The VSTS project to use.
  */
-async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p, client) {
+async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p, client, project) {
     const vcli = client || getVSTSTypeScriptClient(); 
     const build = await vcli.getBuildApi();
     const requestingUser = request.comment.user.login;
@@ -106,7 +109,7 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
         sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
         sourceVersion: ``, // Also undocumented
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
-    })), "TypeScript");
+    })), project ?? "TypeScript");
 }
 
 /**
@@ -277,7 +280,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 new_ts_repo_url: pr.head.repo.clone_url,
                 new_head_ref: pr.head.ref
         })};
-    }, getVSTSDevDivClient())))
+    }, getVSTSDevDivClient(), "NodeRepos")))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
     .set(/create release-([\d\.]+)/, action(async (request, match) => {
         const cli = getGHClient();
