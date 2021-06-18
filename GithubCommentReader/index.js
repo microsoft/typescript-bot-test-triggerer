@@ -1,6 +1,6 @@
 // @ts-check
 const Client = require("@octokit/rest");
-const vsts = require("vso-node-api");
+const vsts = require("azure-devops-node-api");
 const crypto = require("crypto");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
@@ -59,16 +59,25 @@ function getVSTSDevDivClient() {
  */
 
 /**
+ * @typedef {{
+ * definitionId: number;
+ * project?: string;
+ * projectId?: string;
+ * agentPoolId?: number;
+ * sourceBranch?: string;
+ * }} BuildParams
+ */
+
+/**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
  * and update the comment with the build log URL.
  * @param {*} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
- * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {BuildParams} buildParams The VSTS build parameters
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  * @param {vsts.WebApi} [client] The VSTS client to use.
- * @param {string} [project] The VSTS project to use.
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p, client, project) {
+async function makeNewBuildWithComments(request, suiteName, buildParams, buildTriggerAugmentor = p => p, client) {
     const cli = getGHClient();
     const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
     const refSha = pr.head.sha;
@@ -80,7 +89,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         repo: "TypeScript"
     });
     const commentId = result.data.id;
-    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({...p, parameters: JSON.stringify({...JSON.parse(p.parameters), status_comment: commentId})}), client, project);
+    const buildQueue = await triggerBuild(request, pr, buildParams, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }), client);
     await cli.issues.updateComment({
         owner: "microsoft",
         repo: "TypeScript",
@@ -93,23 +102,23 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
  * Authenticate with vsts and schedule the build
  * @param {*} request The request object
  * @param {*} pr The gihtub PR data object
- * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {BuildParams} buildParams The VSTS build parameters
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  * @param {vsts.WebApi} [client] The VSTS client to use.
- * @param {string} [project] The VSTS project to use.
  */
-async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p, client, project) {
-    const vcli = client || getVSTSTypeScriptClient(); 
+async function triggerBuild(request, pr, buildParams, buildTriggerAugmentor = p => p, client) {
+    const vcli = client || getVSTSTypeScriptClient();
     const build = await vcli.getBuildApi();
     const requestingUser = request.comment.user.login;
-    return await build.queueBuild(/** @type {*} */(await buildTriggerAugmentor({
-        definition: { id: definitionId },
-        queue: { id: 11 },
-        project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
+
+    return await build.queueBuild(await buildTriggerAugmentor({
+        definition: { id: buildParams.definitionId },
+        queue: { id: buildParams.agentPoolId ?? 11 },
+        project: { id: buildParams.projectId ?? "cf7ac146-d525-443c-b23c-0d58337efebc" },
+        sourceBranch: buildParams.sourceBranch ?? `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
         sourceVersion: ``, // Also undocumented
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
-    })), project ?? "TypeScript");
+    }), buildParams.project ?? "TypeScript");
 }
 
 /**
@@ -201,7 +210,7 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
         });
         return;
     }
-    await makeNewBuildWithComments(request, `task to cherry-pick this into \`${targetBranch}\``, 30, p => ({
+    await makeNewBuildWithComments(request, `task to cherry-pick this into \`${targetBranch}\``, { definitionId: 30 }, p => ({
         ...p,
         sourceBranch: `refs/pull/${pr.number}/head`,
         parameters: JSON.stringify({
@@ -234,19 +243,19 @@ function action(task, relationships = ["MEMBER", "OWNER", "COLLABORATOR"], prOnl
 }
 
 const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
-    .set(/test this/, action(async request => await makeNewBuildWithComments(request, "extended test suite", 11)))
-    .set(/run dt slower/, action(async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18)))
-    .set(/pack this/, action(async request => await makeNewBuildWithComments(request, "tarball bundle task", 19)))
-    .set(/perf test(?: this)?(?! faster)/, action(async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }}))))
-    .set(/perf test(?: this)? faster/, action(async request => await makeNewBuildWithComments(request, "abridged perf test suite", 45, p => ({...p, queue: { id: 22 }}))))
-    .set(/run dt(?! slower)/, action(async request => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
+    .set(/test this/, action(async request => await makeNewBuildWithComments(request, "extended test suite", { definitionId: 11 })))
+    .set(/run dt slower/, action(async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", { definitionId: 18 })))
+    .set(/pack this/, action(async request => await makeNewBuildWithComments(request, "tarball bundle task", { definitionId: 19 })))
+    .set(/perf test(?: this)?(?! faster)/, action(async request => await makeNewBuildWithComments(request, "perf test suite", { definitionId: 22 }, p => ({...p, queue: { id: 22 }}))))
+    .set(/perf test(?: this)? faster/, action(async request => await makeNewBuildWithComments(request, "abridged perf test suite", { definitionId: 45 }, p => ({...p, queue: { id: 22 }}))))
+    .set(/run dt(?! slower)/, action(async request => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", { definitionId: 23 }, async p => ({
         ...p,
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
             DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
         })
     }))))
-    .set(/user test this slower/, action(async request => await makeNewBuildWithComments(request, "community code test suite", 24, async p => {
+    .set(/user test this slower/, action(async request => await makeNewBuildWithComments(request, "community code test suite", { definitionId: 24 }, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -256,7 +265,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this(?! slower| inline)/, action(async request => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, async p => {
+    .set(/user test this(?! slower| inline)/, action(async request => await makeNewBuildWithComments(request, "parallelized community code test suite", { definitionId: 33 }, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -266,21 +275,32 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this inline/, action(async request => await makeNewBuildWithComments(request, "inline community code test suite", 14672, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+    .set(/user test this inline/, action(async request => await makeNewBuildWithComments(
+        request,
+        "inline community code test suite",
+        {
+            definitionId: 14672,
+            agentPoolId: 1897,
+            project: "NodeRepos",
+            projectId: "d8791be5-9f6d-4ec4-ad68-6bb7464ade24",
+            sourceBranch: "",
+        },
+        async p => {
+            const cli = getGHClient();
+            const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
-        return {
-            ...p,
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
-                post_result: true,
-                old_ts_repo_url: pr.base.repo.clone_url,
-                old_head_ref: pr.base.ref,
-                new_ts_repo_url: pr.head.repo.clone_url,
-                new_head_ref: pr.head.ref
-        })};
-    }, getVSTSDevDivClient(), "NodeRepos")))
+            return {
+                ...p,
+                templateParameters: {
+                    ...JSON.parse(p.parameters),
+                    post_result: true,
+                    old_ts_repo_url: pr.base.repo.clone_url,
+                    old_head_ref: pr.base.ref,
+                    new_ts_repo_url: pr.head.repo.clone_url,
+                    new_head_ref: pr.head.ref
+                }
+            };
+        }, getVSTSDevDivClient())))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
     .set(/create release-([\d\.]+)/, action(async (request, match) => {
         const cli = getGHClient();
