@@ -295,9 +295,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                     ...JSON.parse(p.parameters),
                     post_result: true,
                     old_ts_repo_url: pr.base.repo.clone_url,
-                    old_head_ref: pr.base.ref,
-                    new_ts_repo_url: pr.head.repo.clone_url,
-                    new_head_ref: pr.head.ref
+                    old_head_ref: pr.base.ref
                 }
             };
         }, getVSTSDevDivClient())))
