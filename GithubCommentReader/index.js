@@ -59,16 +59,6 @@ function getVSTSDevDivClient() {
  */
 
 /**
- * @typedef {{
- * definitionId: number;
- * project?: string;
- * projectId?: string;
- * agentPoolId?: number;
- * sourceBranch?: string;
- * }} BuildParams
- */
-
-/**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
  * and update the comment with the build log URL.
  * @param {*} request The request object
@@ -113,14 +103,22 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
     const build = await vcli.getBuildApi();
     const requestingUser = request.comment.user.login;
 
-    return await build.queueBuild(await buildTriggerAugmentor({
+    
+    let buildParams = /** @type BuildVars & { templateParams: object } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
         queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
         sourceVersion: ``, // Also undocumented
-        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
-    }), project ?? "TypeScript");
+        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
+    }));
+
+    buildParams = {
+        ...buildParams,
+        templateParams: JSON.parse(buildParams.parameters)
+    }
+
+    return await build.queueBuild(buildParams, project ?? "TypeScript");
 }
 
 /**
@@ -287,12 +285,12 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             project: { id: "d8791be5-9f6d-4ec4-ad68-6bb7464ade24" },
             sourceBranch: "",
             sourceVersion: ``,
-            templateParameters: {
+            parameters: JSON.stringify({
                 ...JSON.parse(p.parameters),
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref
-            }
+            })
         };
     }, getVSTSDevDivClient(), "NodeRepos")))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
