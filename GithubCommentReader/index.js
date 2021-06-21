@@ -112,11 +112,7 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
         sourceVersion: ``, // Also undocumented
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
     }));
-
-    buildParams = {
-        ...buildParams,
-        templateParams: JSON.parse(buildParams.parameters)
-    }
+    buildParams.templateParams = JSON.parse(buildParams.parameters);
 
     return await build.queueBuild(buildParams, project ?? "TypeScript");
 }
