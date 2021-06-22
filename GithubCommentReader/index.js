@@ -104,7 +104,7 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
     const requestingUser = request.comment.user.login;
 
     
-    let buildParams = /** @type BuildVars & { templateParams: object } */ (await buildTriggerAugmentor({
+    let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
         queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
@@ -112,7 +112,7 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
         sourceVersion: ``, // Also undocumented
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
     }));
-    buildParams.templateParams = JSON.parse(buildParams.parameters);
+    buildParams.templateParameters = JSON.parse(buildParams.parameters);
 
     return await build.queueBuild(buildParams, project ?? "TypeScript");
 }
