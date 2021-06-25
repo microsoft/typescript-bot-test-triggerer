@@ -1,6 +1,6 @@
 // @ts-check
 const Client = require("@octokit/rest");
-const vsts = require("vso-node-api");
+const vsts = require("azure-devops-node-api");
 const crypto = require("crypto");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
@@ -80,7 +80,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         repo: "TypeScript"
     });
     const commentId = result.data.id;
-    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({...p, parameters: JSON.stringify({...JSON.parse(p.parameters), status_comment: commentId})}), client, project);
+    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }), client, project);
     await cli.issues.updateComment({
         owner: "microsoft",
         repo: "TypeScript",
@@ -99,17 +99,22 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
  * @param {string} [project] The VSTS project to use.
  */
 async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p, client, project) {
-    const vcli = client || getVSTSTypeScriptClient(); 
+    const vcli = client || getVSTSTypeScriptClient();
     const build = await vcli.getBuildApi();
     const requestingUser = request.comment.user.login;
-    return await build.queueBuild(/** @type {*} */(await buildTriggerAugmentor({
+
+    
+    let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
         queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
         sourceVersion: ``, // Also undocumented
-        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }) // This API is real bad
-    })), project ?? "TypeScript");
+        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
+    }));
+    buildParams.templateParameters = JSON.parse(buildParams.parameters);
+
+    return await build.queueBuild(buildParams, project ?? "TypeScript");
 }
 
 /**
@@ -272,14 +277,17 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
+            queue: { id: 1897 },
+            project: { id: "d8791be5-9f6d-4ec4-ad68-6bb7464ade24" },
+            sourceBranch: "",
+            sourceVersion: ``,
             parameters: JSON.stringify({
                 ...JSON.parse(p.parameters),
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
-                old_head_ref: pr.base.ref,
-                new_ts_repo_url: pr.head.repo.clone_url,
-                new_head_ref: pr.head.ref
-        })};
+                old_head_ref: pr.base.ref
+            })
+        };
     }, getVSTSDevDivClient(), "NodeRepos")))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
     .set(/create release-([\d\.]+)/, action(async (request, match) => {

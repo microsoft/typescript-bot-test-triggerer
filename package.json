@@ -11,6 +11,6 @@
   "license": "SEE LICENSE IN ASSOCIATED REPO",
   "dependencies": {
     "@octokit/rest": "^16",
-    "vso-node-api": "^6.5.0"
+    "azure-devops-node-api": "^11.0.0"
   }
 }
