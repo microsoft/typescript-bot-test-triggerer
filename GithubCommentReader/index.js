@@ -42,7 +42,20 @@ function getVSTSDevDivClient() {
 }
 
 /**
- * @typedef {import("azure-devops-node-api/interfaces/BuildInterfaces").Build & { parameters: string }} BuildVars
+ * @typedef {{
+ *   definition: {
+ *       id: number;
+ *   };
+ *   queue: {
+ *       id: number;
+ *   };
+ *   project: {
+ *       id: string;
+ *   };
+ *   sourceBranch: string;
+ *   sourceVersion: string;
+ *   parameters: string;
+ * }} BuildVars
  */
 
 /**
@@ -92,7 +105,6 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
 
     
     let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
-        agentSpecification: { identifier: "ubuntu-20.04" },
         definition: { id: definitionId },
         queue: { id: 11 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
