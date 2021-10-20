@@ -106,7 +106,7 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
     
     let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
-        queue: { id: 11 },
+        queue: { id: 26 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
         sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
         sourceVersion: ``, // Also undocumented
