@@ -12,10 +12,8 @@ function getGHClient() {
         return clients.GH;
     }
     else {
-        clients.GH = new Client.Octokit();
-        clients.GH.authenticate({
-            type: "token",
-            token: process.env.GITHUB_TOKEN
+        clients.GH = new Client.Octokit({
+            auth: process.env.GITHUB_TOKEN
         });
         return clients.GH;
     }
@@ -75,7 +73,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
     const requestingUser = request.comment.user.login;
     const result = await cli.issues.createComment({
         body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
-        number: pr.number,
+        issue_number: pr.number,
         owner: "microsoft",
         repo: "TypeScript"
     });
