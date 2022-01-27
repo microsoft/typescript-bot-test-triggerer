@@ -269,6 +269,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
+            sourceBranch: "", // Maybe should be empty because this isn't on the Typescript repo?
             parameters: JSON.stringify({
                 ...JSON.parse(p.parameters),
                 post_result: true,
