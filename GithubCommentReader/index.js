@@ -29,16 +29,6 @@ function getVSTSTypeScriptClient() {
     }
 }
 
-function getVSTSDevDivClient() {
-    if (clients.vstsDevdiv) {
-        return clients.vstsDevdiv;
-    }
-    else {
-        clients.vstsDevdiv = new vsts.WebApi("https://devdiv.visualstudio.com/defaultcollection", vsts.getPersonalAccessTokenHandler(process.env.DEVDIV_TOKEN));
-        return clients.vstsDevdiv;
-    }
-}
-
 /**
  * @typedef {{
  *   definition: {
@@ -63,10 +53,8 @@ function getVSTSDevDivClient() {
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
- * @param {vsts.WebApi} [client] The VSTS client to use.
- * @param {string} [project] The VSTS project to use.
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p, client, project) {
+async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p) {
     const cli = getGHClient();
     const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
     const refSha = pr.head.sha;
@@ -78,7 +66,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         repo: "TypeScript"
     });
     const commentId = result.data.id;
-    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }), client, project);
+    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }));
     await cli.issues.updateComment({
         owner: "microsoft",
         repo: "TypeScript",
@@ -90,18 +78,13 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
 /**
  * Authenticate with vsts and schedule the build
  * @param {*} request The request object
- * @param {*} pr The gihtub PR data object
+ * @param {*} pr The github PR data object
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
- * @param {vsts.WebApi} [client] The VSTS client to use.
- * @param {string} [project] The VSTS project to use.
  */
-async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p, client, project) {
-    const vcli = client || getVSTSTypeScriptClient();
-    const build = await vcli.getBuildApi();
+async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p) {
+    const build = await getVSTSTypeScriptClient().getBuildApi();
     const requestingUser = request.comment.user.login;
-
-    
     let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
         queue: { id: 26 },
@@ -112,7 +95,7 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
     }));
     buildParams.templateParameters = JSON.parse(buildParams.parameters);
 
-    return await build.queueBuild(buildParams, project ?? "TypeScript");
+    return await build.queueBuild(buildParams, "TypeScript");
 }
 
 /**
@@ -212,7 +195,7 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
             target_branch: targetBranch,
             ...(produceLKG ? {PRODUCE_LKG: "true"} : {})
         })
-    }), getVSTSTypeScriptClient());
+    }));
 }
 
 /**
@@ -269,7 +252,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this inline/, action(async request => await makeNewBuildWithComments(request, "inline community code test suite", 14672, async p => {
+    .set(/user test this inline/, action(async request => await makeNewBuildWithComments(request, "inline community code test suite", 47, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -286,7 +269,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 old_head_ref: pr.base.ref
             })
         };
-    }, getVSTSDevDivClient(), "NodeRepos")))
+    })))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
     .set(/create release-([\d\.]+)/, action(async (request, match) => {
         const cli = getGHClient();
@@ -389,8 +372,8 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         }, `sync \`${branch}\` with main`);
     }, undefined, false))
     .set(/run repros/, action(async (request, match) => {
-        const issueNumber = request.issue && request.issue.number 
-        const prNumber = request.pull_request && request.pull_request.number 
+        const issueNumber = request.issue && request.issue.number
+        const prNumber = request.pull_request && request.pull_request.number
         await triggerGHActionWithComment(request, "run-twoslash-repros", { number: issueNumber || prNumber || undefined }, `run the code sample repros`);
     }, undefined, false));
 
@@ -411,6 +394,15 @@ module.exports = async function (context, data) {
     const isPr = !!request.pull_request || !!(request.issue && request.issue.pull_request);
     const command = matchesCommand(context, request.comment.body, isPr, request.comment.author_association);
     if (!command) {
+        if (request.issue && request.issue.number) {
+            const cli = getGHClient();
+            await cli.issues.createComment({
+                body: "Here are the commands I respond to:<br/>" + Array.from(commands.keys()).map(re => re.toString()).join("<br/>"),
+                issue_number: request.issue.number,
+                owner: "microsoft",
+                repo: "TypeScript"
+            });
+        }
         return context.done();
     }
 
@@ -442,7 +434,7 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     }
     const botCall = "@typescript-bot";
     if (body.indexOf(botCall) !== -1) {
-        context.log(`Bot reference detected ${body}`);
+        context.log(`Bot reference detected on ${1} in '${body}'`);
     }
     /** @type {((req: any) => Promise<void>)[]} */
     let results = [];
