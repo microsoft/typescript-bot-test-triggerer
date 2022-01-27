@@ -394,15 +394,6 @@ module.exports = async function (context, data) {
     const isPr = !!request.pull_request || !!(request.issue && request.issue.pull_request);
     const command = matchesCommand(context, request.comment.body, isPr, request.comment.author_association);
     if (!command) {
-        if (request.issue && request.issue.number) {
-            const cli = getGHClient();
-            await cli.issues.createComment({
-                body: "Here are the commands I respond to:<br/>" + Array.from(commands.keys()).map(re => re.toString()).join("<br/>"),
-                issue_number: request.issue.number,
-                owner: "microsoft",
-                repo: "TypeScript"
-            });
-        }
         return context.done();
     }
 
