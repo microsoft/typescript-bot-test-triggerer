@@ -79,7 +79,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
         comment_id: commentId,
         body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}).`
     });
-    log(`Uppdated to "build is queued" comment ${commentId}`)
+    log(`Updated to "build is queued" comment ${commentId}`)
 }
 
 /**
@@ -104,7 +104,7 @@ async function triggerBuild(request, pr, definitionId, log, buildTriggerAugmento
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
     }));
     buildParams.templateParameters = JSON.parse(buildParams.parameters);
-    log(`Final template parameters after augmentating: ${buildParams.templateParameters}`)
+    log(`Final template parameters after augmentation: ${JSON.stringify(buildParams.templateParameters)}`)
     return await build.queueBuild(buildParams, "TypeScript");
 }
 
@@ -269,10 +269,6 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
-            queue: { id: 1897 },
-            project: { id: "d8791be5-9f6d-4ec4-ad68-6bb7464ade24" },
-            sourceBranch: "",
-            sourceVersion: ``,
             parameters: JSON.stringify({
                 ...JSON.parse(p.parameters),
                 post_result: true,
