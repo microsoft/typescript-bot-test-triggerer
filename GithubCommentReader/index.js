@@ -52,11 +52,15 @@ function getVSTSTypeScriptClient() {
  * @param {*} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {(s: string) => void} log
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId, buildTriggerAugmentor = p => p) {
+async function makeNewBuildWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
+    log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
     const cli = getGHClient();
+    log("Got github client")
     const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+    log(`Got pr for ${request.issue.number}`)
     const refSha = pr.head.sha;
     const requestingUser = request.comment.user.login;
     const result = await cli.issues.createComment({
@@ -66,13 +70,16 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
         repo: "TypeScript"
     });
     const commentId = result.data.id;
-    const buildQueue = await triggerBuild(request, pr, definitionId, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }));
+    log(`Created new "started running" comment ${commentId}`)
+    const buildQueue = await triggerBuild(request, pr, definitionId, log, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }));
+    log(`Build done queueing`)
     await cli.issues.updateComment({
         owner: "microsoft",
         repo: "TypeScript",
         comment_id: commentId,
         body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}).`
     });
+    log(`Uppdated to "build is queued" comment ${commentId}`)
 }
 
 /**
@@ -80,10 +87,13 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, buildT
  * @param {*} request The request object
  * @param {*} pr The github PR data object
  * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {(s: string) => void} log
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
-async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p => p) {
+async function triggerBuild(request, pr, definitionId, log, buildTriggerAugmentor = p => p) {
+    log(`Trigger build ${definitionId} on ${request.issue.number}`)
     const build = await getVSTSTypeScriptClient().getBuildApi();
+    log("Got VSTS Client's Build API")
     const requestingUser = request.comment.user.login;
     let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
@@ -94,14 +104,14 @@ async function triggerBuild(request, pr, definitionId, buildTriggerAugmentor = p
         parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
     }));
     buildParams.templateParameters = JSON.parse(buildParams.parameters);
-
+    log(`Final template parameters after augmentating: ${buildParams.templateParameters}`)
     return await build.queueBuild(buildParams, "TypeScript");
 }
 
 /**
  * @param {any} request
- * @param {string} event 
- * @param {object} payload 
+ * @param {string} event
+ * @param {object} payload
  */
 async function triggerGHAction(request, event, payload) {
     const cli = getGHClient();
@@ -166,8 +176,9 @@ async function triggerGHActionWithComment(request, event, payload, message) {
  * @param {*} request
  * @param {string} targetBranch
  * @param {boolean} produceLKG
+ * @param {(s: string) => void} log
  */
-async function makeCherryPickPR(request, targetBranch, produceLKG) {
+async function makeCherryPickPR(request, targetBranch, produceLKG, log) {
     const cli = getGHClient();
     const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
     try {
@@ -187,7 +198,7 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
         });
         return;
     }
-    await makeNewBuildWithComments(request, `task to cherry-pick this into \`${targetBranch}\``, 30, p => ({
+    await makeNewBuildWithComments(request, `task to cherry-pick this into \`${targetBranch}\``, 30, log, p => ({
         ...p,
         sourceBranch: `refs/pull/${pr.number}/head`,
         parameters: JSON.stringify({
@@ -200,14 +211,14 @@ async function makeCherryPickPR(request, targetBranch, produceLKG) {
 
 /**
  * @typedef {Object} CommentAction
- * @property {(req: any, match?: RegExpExecArray) => Promise<void>} task 
- * @property {("MEMBER" | "OWNER" | "COLLABORATOR")[]} relationships 
+ * @property {(req: any, log: (s: string) => void, match?: RegExpExecArray) => Promise<void>} task
+ * @property {("MEMBER" | "OWNER" | "COLLABORATOR")[]} relationships
  * @property {boolean} prOnly
  */
 
 /**
- * @param {(req: any, match?: RegExpExecArray) => Promise<void>} task 
- * @param {("MEMBER" | "OWNER" | "COLLABORATOR")[]=} relationships 
+ * @param {(req: any, log: (s: string) => void, match?: RegExpExecArray) => Promise<void>} task
+ * @param {("MEMBER" | "OWNER" | "COLLABORATOR")[]=} relationships
  * @param {boolean=} prOnly
  * @returns {CommentAction}
  */
@@ -220,19 +231,19 @@ function action(task, relationships = ["MEMBER", "OWNER", "COLLABORATOR"], prOnl
 }
 
 const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
-    .set(/test this/, action(async request => await makeNewBuildWithComments(request, "extended test suite", 11)))
-    .set(/run dt slower/, action(async request => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18)))
-    .set(/pack this/, action(async request => await makeNewBuildWithComments(request, "tarball bundle task", 19)))
-    .set(/perf test(?: this)?(?! faster)/, action(async request => await makeNewBuildWithComments(request, "perf test suite", 22, p => ({...p, queue: { id: 22 }}))))
-    .set(/perf test(?: this)? faster/, action(async request => await makeNewBuildWithComments(request, "abridged perf test suite", 45, p => ({...p, queue: { id: 22 }}))))
-    .set(/run dt(?! slower)/, action(async request => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, async p => ({
+    .set(/test this/, action(async (request, log) => await makeNewBuildWithComments(request, "extended test suite", 11, log)))
+    .set(/run dt slower/, action(async (request, log) => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18, log)))
+    .set(/pack this/, action(async (request, log) => await makeNewBuildWithComments(request, "tarball bundle task", 19, log)))
+    .set(/perf test(?: this)?(?! faster)/, action(async (request, log) => await makeNewBuildWithComments(request, "perf test suite", 22, log, p => ({...p, queue: { id: 22 }}))))
+    .set(/perf test(?: this)? faster/, action(async (request, log) => await makeNewBuildWithComments(request, "abridged perf test suite", 45, log, p => ({...p, queue: { id: 22 }}))))
+    .set(/run dt(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, log, async p => ({
         ...p,
         parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
             DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
         })
     }))))
-    .set(/user test this slower/, action(async request => await makeNewBuildWithComments(request, "community code test suite", 24, async p => {
+    .set(/user test this slower/, action(async (request, log) => await makeNewBuildWithComments(request, "community code test suite", 24, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -242,7 +253,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this(?! slower| inline)/, action(async request => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, async p => {
+    .set(/user test this(?! slower| inline)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -252,7 +263,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this inline/, action(async request => await makeNewBuildWithComments(request, "inline community code test suite", 47, async p => {
+    .set(/user test this inline/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based community code test suite", 47, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
@@ -270,8 +281,8 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             })
         };
     })))
-    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, match) => await makeCherryPickPR(request, match[1], !!match[2])))
-    .set(/create release-([\d\.]+)/, action(async (request, match) => {
+    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, log, match) => await makeCherryPickPR(request, match[1], !!match[2], log)))
+    .set(/create release-([\d\.]+)/, action(async (request, log, match) => {
         const cli = getGHClient();
         const targetBranch = `release-${match[1]}`;
         let targetBranchExists = false;
@@ -304,7 +315,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             branch_name: targetBranch
         }, `create the \`${targetBranch}\` branch`);
     }, undefined, false))
-    .set(/bump release-([\d\.]+)/, action(async (request, match) => {
+    .set(/bump release-([\d\.]+)/, action(async (request, log, match) => {
         const cli = getGHClient();
         const targetBranch = `release-${match[1]}`;
         const requestingUser = request.comment.user.login;
@@ -365,13 +376,13 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             branch_name: targetBranch
         }, `update the version number on \`${targetBranch}\` to \`${new_version}\``);
     }, undefined, false))
-    .set(/sync release-([\d\.]+)/, action(async (request, match) => {
+    .set(/sync release-([\d\.]+)/, action(async (request, log, match) => {
         const branch = `release-${match[1]}`;
         await triggerGHActionWithComment(request, "sync-branch", {
             branch_name: branch
         }, `sync \`${branch}\` with main`);
     }, undefined, false))
-    .set(/run repros/, action(async (request, match) => {
+    .set(/run repros/, action(async (request, log, match) => {
         const issueNumber = request.issue && request.issue.number
         const prNumber = request.pull_request && request.pull_request.number
         await triggerGHActionWithComment(request, "run-twoslash-repros", { number: issueNumber || prNumber || undefined }, `run the code sample repros`);
@@ -432,7 +443,7 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     for (const [key, action] of applicableActions) {
         const fullRe = new RegExp(`${botCall} ${key.source}`, "i");
         if (fullRe.test(body)) {
-            results.push(r => action.task(r, fullRe.exec(body)));
+            results.push(r => action.task(r, s => context.log(s), fullRe.exec(body)));
         }
     }
     if (!results.length) {
