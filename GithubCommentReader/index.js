@@ -434,7 +434,7 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     }
     const botCall = "@typescript-bot";
     if (body.indexOf(botCall) !== -1) {
-        context.log(`Bot reference detected on ${1} in '${body}'`);
+        context.log(`Bot reference detected in '${body}'`);
     }
     /** @type {((req: any) => Promise<void>)[]} */
     let results = [];
