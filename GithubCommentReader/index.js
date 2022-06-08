@@ -253,28 +253,34 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             target_branch: pr.head.ref
         })};
     })))
-    .set(/user test this(?! slower| inline)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized community code test suite", 33, log, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
-
-        return {...p, parameters: JSON.stringify({
-            ...JSON.parse(p.parameters),
-            target_fork: pr.head.repo.owner.login,
-            target_branch: pr.head.ref
-        })};
-    })))
-    .set(/user test this inline/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based community code test suite", 47, log, async p => {
+    .set(/user test this(?: inline)?(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
         return {
             ...p,
-            sourceBranch: "", // Maybe should be empty because this isn't on the Typescript repo?
+            sourceBranch: "",
             parameters: JSON.stringify({
                 ...JSON.parse(p.parameters),
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref
+            })
+        };
+    })))
+    .set(/top100 test this/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
+        const cli = getGHClient();
+        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+
+        return {
+            ...p,
+            sourceBranch: "",
+            parameters: JSON.stringify({
+                ...JSON.parse(p.parameters),
+                post_result: true,
+                old_ts_repo_url: pr.base.repo.clone_url,
+                old_head_ref: pr.base.ref,
+                top_repos: true,
             })
         };
     })))
