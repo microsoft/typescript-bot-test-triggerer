@@ -268,7 +268,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             })
         };
     })))
-    .set(/top100 test this/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
+    .set(/test top100/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
