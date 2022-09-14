@@ -158,7 +158,7 @@ async function triggerGHActionWithComment(request, event, payload, message) {
     // TODO: If GH ever makes the `repository_dispatch` event actually return the scheduled jobs,
     // use that info here
     const workflow = await cli.actions.listRepoWorkflowRuns({
-        owner: "microsoft", 
+        owner: "microsoft",
         repo: "TypeScript",
         branch: "main",
         event: "repository_dispatch"
@@ -268,6 +268,22 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             })
         };
     })))
+    .set(/user test tsserver/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite (tsserver)", 47, log, async p => {
+        const cli = getGHClient();
+        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+
+        return {
+            ...p,
+            sourceBranch: "",
+            parameters: JSON.stringify({
+                ...JSON.parse(p.parameters),
+                post_result: true,
+                old_ts_repo_url: pr.base.repo.clone_url,
+                old_head_ref: pr.base.ref,
+                entrypoint: "tsserver",
+            })
+        };
+    })))
     .set(/test top100/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based top-repos suite", 47, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
@@ -281,6 +297,23 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 top_repos: true,
+            })
+        };
+    })))
+    .set(/test tsserver top100/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based top-repos suite (tsserver)", 47, log, async p => {
+        const cli = getGHClient();
+        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+
+        return {
+            ...p,
+            sourceBranch: "",
+            parameters: JSON.stringify({
+                ...JSON.parse(p.parameters),
+                post_result: true,
+                old_ts_repo_url: pr.base.repo.clone_url,
+                old_head_ref: pr.base.ref,
+                top_repos: true,
+                entrypoint: "tsserver",
             })
         };
     })))
