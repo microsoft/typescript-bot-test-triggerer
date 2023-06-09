@@ -285,9 +285,10 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             })
         };
     })))
-    .set(/test top100/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based top-repos suite", 47, log, async p => {
+    .set(/test top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite", 47, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const numRepos = +match[1];
 
         return {
             ...p,
@@ -298,12 +299,14 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 top_repos: true,
+                repo_count: numRepos,
             })
         };
     })))
-    .set(/test tsserver top100/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based top-repos suite (tsserver)", 47, log, async p => {
+    .set(/test tsserver top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite (tsserver)", 47, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const numRepos = +match[1];
 
         return {
             ...p,
@@ -314,6 +317,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 top_repos: true,
+                repo_count: numRepos,
                 entrypoint: "tsserver",
                 prng_seed: pr.id,
             })
