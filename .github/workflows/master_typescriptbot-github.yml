@@ -20,6 +20,11 @@ jobs:
     - name: 'Checkout GitHub Action'
       uses: actions/checkout@v2
 
+    - name: 'Login via Azure CLI'
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_RBAC_CREDENTIALS }}
+
     - name: Setup Node ${{ env.NODE_VERSION }} Environment
       uses: actions/setup-node@v1
       with:
@@ -41,4 +46,3 @@ jobs:
         app-name: 'typescriptbot-github'
         slot-name: 'production'
         package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        publish-profile: ${{ secrets.AzureAppService_PublishProfile_5f8a7743cffa4923b0a92ca1ffddcf36 }}
