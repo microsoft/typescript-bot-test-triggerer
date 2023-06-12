@@ -3,6 +3,9 @@
 
 name: Build and deploy Node.js project to Azure Function App - typescriptbot-github
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
