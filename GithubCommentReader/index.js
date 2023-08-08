@@ -1,7 +1,7 @@
-// @ts-check
 const Client = require("@octokit/rest");
 const vsts = require("azure-devops-node-api");
 const crypto = require("crypto");
+const assert = require("assert");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
 /** @type {{GH?: Client.Octokit, vstsTypescript?: vsts.WebApi, vstsDevdiv?: vsts.WebApi}} */
@@ -24,7 +24,9 @@ function getVSTSTypeScriptClient() {
         return clients.vstsTypescript;
     }
     else {
-        clients.vstsTypescript = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getPersonalAccessTokenHandler(process.env.VSTS_TOKEN));
+        const token = process.env.VSTS_TOKEN;
+        assert(token, "VSTS_TOKEN must be set");
+        clients.vstsTypescript = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getPersonalAccessTokenHandler(token));
         return clients.vstsTypescript;
     }
 }
@@ -95,7 +97,7 @@ async function triggerBuild(request, pr, definitionId, log, buildTriggerAugmento
     const build = await getVSTSTypeScriptClient().getBuildApi();
     log("Got VSTS Client's Build API")
     const requestingUser = request.comment.user.login;
-    let buildParams = /** @type BuildVars & { templateParameters: object } */ (await buildTriggerAugmentor({
+    let buildParams = /** @type BuildVars & { templateParameters: Record<string, string> } */ (await buildTriggerAugmentor({
         definition: { id: definitionId },
         queue: { id: 26 },
         project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
@@ -148,6 +150,7 @@ async function sleep(duration) {
  * @param {any} request
  * @param {string} event
  * @param {object} payload
+ * @param {string} message
  */
 async function triggerGHActionWithComment(request, event, payload, message) {
     const cli = getGHClient();
@@ -211,13 +214,13 @@ async function makeCherryPickPR(request, targetBranch, produceLKG, log) {
 
 /**
  * @typedef {Object} CommentAction
- * @property {(req: any, log: (s: string) => void, match?: RegExpExecArray) => Promise<void>} task
+ * @property {(req: any, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
  * @property {("MEMBER" | "OWNER" | "COLLABORATOR")[]} relationships
  * @property {boolean} prOnly
  */
 
 /**
- * @param {(req: any, log: (s: string) => void, match?: RegExpExecArray) => Promise<void>} task
+ * @param {(req: any, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
  * @param {("MEMBER" | "OWNER" | "COLLABORATOR")[]=} relationships
  * @param {boolean=} prOnly
  * @returns {CommentAction}
@@ -429,9 +432,15 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         await triggerGHActionWithComment(request, "run-twoslash-repros", { number: issueNumber || prNumber || undefined }, `run the code sample repros`);
     }, undefined, false));
 
+/**
+ * @param {*} context 
+ * @param {*} data 
+ */
 module.exports = async function (context, data) {
     const sig = data.headers["x-hub-signature"];
-    const hmac = crypto.createHmac("sha1", process.env.WEBHOOK_TOKEN);
+    const webhookToken = process.env.WEBHOOK_TOKEN;
+    assert(webhookToken, "WEBHOOK_TOKEN is not set")
+    const hmac = crypto.createHmac("sha1", webhookToken);
     hmac.write(data.rawBody);
     const digest = hmac.digest();
     if (!sig || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(`sha1=${digest.toString("hex")}`))) {
@@ -484,7 +493,9 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     for (const [key, action] of applicableActions) {
         const fullRe = new RegExp(`${botCall} ${key.source}`, "i");
         if (fullRe.test(body)) {
-            results.push(r => action.task(r, s => context.log(s), fullRe.exec(body)));
+            const match = fullRe.exec(body);
+            assert(match);
+            results.push(r => action.task(r, s => context.log(s), match));
         }
     }
     if (!results.length) {
