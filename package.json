@@ -9,8 +9,13 @@
   },
   "author": "",
   "license": "SEE LICENSE IN ASSOCIATED REPO",
+  "packageManager": "npm@8.19.4",
   "dependencies": {
     "@octokit/rest": "^16",
     "azure-devops-node-api": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.8",
+    "typescript": "^5.1.6"
   }
 }
