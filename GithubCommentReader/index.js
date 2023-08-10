@@ -34,6 +34,42 @@ function getVSTSTypeScriptClient() {
 }
 
 /**
+ * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
+ * and update the comment with the build log URL.
+ * @param {*} request The request object
+ * @param {string} suiteName The frindly name to call the suite in the associated comment
+ * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {(s: string) => void} log
+ * @param {(pr: any, commentId: number) => Promise<string>} buildTrigger
+ */
+async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
+    log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
+    const cli = getGHClient();
+    log("Got github client")
+    const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+    log(`Got pr for ${request.issue.number}`)
+    const refSha = pr.head.sha;
+    const requestingUser = request.comment.user.login;
+    const result = await cli.issues.createComment({
+        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
+        issue_number: pr.number,
+        owner: "microsoft",
+        repo: "TypeScript"
+    });
+    const commentId = result.data.id;
+    log(`Created new "started running" comment ${commentId}`)
+    const buildUrl = await buildTrigger(pr, commentId);
+    log(`Build done queueing`)
+    await cli.issues.updateComment({
+        owner: "microsoft",
+        repo: "TypeScript",
+        comment_id: commentId,
+        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildUrl}).`
+    });
+    log(`Updated to "build is queued" comment ${commentId}`)
+}
+
+/**
  * @typedef {{
  *   definition: {
  *       id: number;
@@ -140,42 +176,6 @@ async function makeNewPipelineRunWithComments(request, suiteName, definitionId, 
         const response = await build.rest.create(url, args, options);
         return response.result._links.web.href;
     })
-}
-
-/**
- * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
- * and update the comment with the build log URL.
- * @param {*} request The request object
- * @param {string} suiteName The frindly name to call the suite in the associated comment
- * @param {number} definitionId The VSTS id of the build definition to trigger
- * @param {(s: string) => void} log
- * @param {(pr: any, commentId: number) => Promise<string>} buildTrigger
- */
-async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
-    log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
-    const cli = getGHClient();
-    log("Got github client")
-    const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
-    log(`Got pr for ${request.issue.number}`)
-    const refSha = pr.head.sha;
-    const requestingUser = request.comment.user.login;
-    const result = await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
-        issue_number: pr.number,
-        owner: "microsoft",
-        repo: "TypeScript"
-    });
-    const commentId = result.data.id;
-    log(`Created new "started running" comment ${commentId}`)
-    const buildUrl = await buildTrigger(pr, commentId);
-    log(`Build done queueing`)
-    await cli.issues.updateComment({
-        owner: "microsoft",
-        repo: "TypeScript",
-        comment_id: commentId,
-        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildUrl}).`
-    });
-    log(`Updated to "build is queued" comment ${commentId}`)
 }
 
 /**
