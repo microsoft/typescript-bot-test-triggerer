@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const assert = require("assert");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
-/** @type {{GH?: Client.Octokit, vstsTypescript?: vsts.WebApi, vstsDevdiv?: vsts.WebApi}} */
+/** @type {{GH?: Client.Octokit, vstsTypescript?: vsts.WebApi}} */
 let clients = {};
 
 function getGHClient() {
@@ -18,6 +18,8 @@ function getGHClient() {
         return clients.GH;
     }
 }
+
+const typeScriptProjectId = "cf7ac146-d525-443c-b23c-0d58337efebc";
 
 function getVSTSTypeScriptClient() {
     if (clients.vstsTypescript) {
@@ -33,19 +35,16 @@ function getVSTSTypeScriptClient() {
 
 /**
  * @typedef {{
- *   definition: {
- *       id: number;
+ *   resources?: {
+ *     repositories?: Record<string, { refName?: string; version?: string } | undefined>;
  *   };
- *   queue: {
- *       id: number;
- *   };
- *   project: {
- *       id: string;
- *   };
- *   sourceBranch: string;
- *   sourceVersion: string;
- *   parameters: string;
- * }} BuildVars
+ *   variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
+ *   templateParameters?: Record<string, string | number | boolean | undefined>;
+ * }} PipelineRunArgs
+ * 
+ * @typedef {{
+ *   _links: { web: { href: string }; };
+ * }} PipelineRunResult
  */
 
 /**
@@ -55,7 +54,7 @@ function getVSTSTypeScriptClient() {
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
- * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ * @param {(x: PipelineRunArgs) => (Promise<PipelineRunArgs> | PipelineRunArgs)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
 async function makeNewBuildWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
     log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
@@ -73,7 +72,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
     });
     const commentId = result.data.id;
     log(`Created new "started running" comment ${commentId}`)
-    const buildQueue = await triggerBuild(request, pr, definitionId, log, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }));
+    const buildQueue = await triggerBuild(request, pr, definitionId, log, p => buildTriggerAugmentor({ ...p, templateParameters: { ...p.templateParameters, comment_id: commentId }}));
     log(`Build done queueing`)
     await cli.issues.updateComment({
         owner: "microsoft",
@@ -90,25 +89,44 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
  * @param {*} pr The github PR data object
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
- * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ * @param {(x: PipelineRunArgs) => (Promise<PipelineRunArgs> | PipelineRunArgs)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ * @returns {Promise<PipelineRunResult>}
  */
 async function triggerBuild(request, pr, definitionId, log, buildTriggerAugmentor = p => p) {
     log(`Trigger build ${definitionId} on ${request.issue.number}`)
     const build = await getVSTSTypeScriptClient().getBuildApi();
     log("Got VSTS Client's Build API")
+
+    // The new pipelines API is not yet supported by the node client, so we have to do this manually.
+    // The request was reverse engineered from the HTTP requests made by the azure devops UI, the node client, and the Go client (which has implemented this).
+    // https://github.com/microsoft/azure-devops-go-api/blob/8dbf8bfd3346f337d914961fab01df812985dcb8/azuredevops/v7/pipelines/client.go#L446
+    const verData = await build.vsoClient.getVersioningData("7.1-preview.1", "pipelines", "7859261e-d2e9-4a68-b820-a5d84cc5bb3d", { project: typeScriptProjectId, pipelineId: definitionId });
+    const url = verData.requestUrl;
+    const options = build.createRequestOptions('application/json', verData.apiVersion);
+    assert(url);
+
     const requestingUser = request.comment.user.login;
-    let buildParams = /** @type BuildVars & { templateParameters: Record<string, string> } */ (await buildTriggerAugmentor({
-        definition: { id: definitionId },
-        queue: { id: 26 },
-        project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
-        sourceVersion: ``, // Also undocumented
-        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
-    }));
-    buildParams.templateParameters = JSON.parse(buildParams.parameters);
-    log(`Final template parameters after augmentation: ${JSON.stringify(buildParams.templateParameters)}`)
-    return await build.queueBuild(buildParams, "TypeScript");
+    /** @type {PipelineRunArgs} */
+    let args = {
+        resources: {
+            repositories: {
+                self: {
+                    refName: `refs/pull/${pr.number}/merge`,
+                }
+            }
+        },
+        templateParameters: {
+            source_issue: pr.number,
+            requesting_user: requestingUser,
+        }
+    }
+    args = await buildTriggerAugmentor(args);
+
+    log(`Final template parameters after augmentation: ${JSON.stringify(args)}`)
+    const response = await build.rest.create(url, args, options);
+    return response.result;
 }
+
 
 /**
  * @param {any} request
@@ -203,12 +221,18 @@ async function makeCherryPickPR(request, targetBranch, produceLKG, log) {
     }
     await makeNewBuildWithComments(request, `task to cherry-pick this into \`${targetBranch}\``, 30, log, p => ({
         ...p,
-        sourceBranch: `refs/pull/${pr.number}/head`,
-        parameters: JSON.stringify({
-            ...JSON.parse(p.parameters),
+        resources: {
+            repositories: {
+                self: {
+                    refName: `refs/pull/${pr.number}/head`,
+                }
+            }
+        },
+        templateParameters: {
+            ...p.templateParameters,
             target_branch: targetBranch,
             ...(produceLKG ? {PRODUCE_LKG: "true"} : {})
-        })
+        },
     }));
 }
 
@@ -240,20 +264,23 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/perf test(?: this)? faster/, action(async (request, log) => await makeNewBuildWithComments(request, "abridged perf test suite", 45, log, p => ({...p, queue: { id: 22 }}))))
     .set(/run dt(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, log, async p => ({
         ...p,
-        parameters: JSON.stringify({
-            ...JSON.parse(p.parameters),
-            DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
-        })
+        templateParameters: {
+            ...p.templateParameters,
+            DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha,
+        }
     }))))
     .set(/user test this slower/, action(async (request, log) => await makeNewBuildWithComments(request, "community code test suite", 24, log, async p => {
         const cli = getGHClient();
         const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
 
-        return {...p, parameters: JSON.stringify({
-            ...JSON.parse(p.parameters),
-            target_fork: pr.head.repo.owner.login,
-            target_branch: pr.head.ref
-        })};
+        return {
+            ...p,
+            templateParameters: {
+                ...p.templateParameters,
+                target_fork: pr.head.repo.owner.login,
+                target_branch: pr.head.ref,
+            },
+        };
     })))
     .set(/user test this(?: inline)?(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
         const cli = getGHClient();
@@ -261,13 +288,13 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
-            sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
+            resources: undefined, // This pipeline is in typescript-error-deltas; clear this so just use default branch.
+            templateParameters: {
+                ...p.templateParameters,
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref
-            })
+            },
         };
     })))
     .set(/user test tsserver/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite (tsserver)", 47, log, async p => {
@@ -276,15 +303,15 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
-            sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
+            resources: undefined, // This pipeline is in typescript-error-deltas; clear this so just use default branch
+            templateParameters: {
+                ...p.templateParameters,
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 entrypoint: "tsserver",
-                prng_seed: pr.id,
-            })
+                prng_seed: pr.id.toString(),
+            },
         };
     })))
     .set(/test top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite", 47, log, async p => {
@@ -294,15 +321,15 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
-            sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
+            resources: undefined, // This pipeline is in typescript-error-deltas; clear this so just use default branch
+            templateParameters: {
+                ...p.templateParameters,
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 top_repos: true,
                 repo_count: numRepos,
-            })
+            },
         };
     })))
     .set(/test tsserver top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite (tsserver)", 47, log, async p => {
@@ -313,8 +340,9 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         return {
             ...p,
             sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
+            resources: undefined, // This pipeline is in typescript-error-deltas; clear this so just use default branch
+            templateParameters: {
+                ...p.templateParameters,
                 post_result: true,
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
@@ -322,7 +350,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 repo_count: numRepos,
                 entrypoint: "tsserver",
                 prng_seed: pr.id,
-            })
+            },
         };
     })))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)( and LKG)?/, action(async (request, log, match) => await makeCherryPickPR(request, match[1], !!match[2], log)))
