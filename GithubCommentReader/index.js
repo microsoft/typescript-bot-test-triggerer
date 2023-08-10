@@ -127,7 +127,6 @@ async function triggerBuild(request, pr, definitionId, log, buildTriggerAugmento
     return response.result;
 }
 
-
 /**
  * @param {any} request
  * @param {string} event
@@ -310,7 +309,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 entrypoint: "tsserver",
-                prng_seed: pr.id.toString(),
+                prng_seed: pr.id
             },
         };
     })))
