@@ -338,7 +338,6 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {
             ...p,
-            sourceBranch: "",
             resources: undefined, // This pipeline is in typescript-error-deltas; clear this so just use default branch
             templateParameters: {
                 ...p.templateParameters,
