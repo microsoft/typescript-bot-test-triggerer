@@ -76,7 +76,7 @@ function getVSTSTypeScriptClient() {
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
 async function makeNewBuildWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
-    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr) => {
+    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
         log(`Trigger build ${definitionId} on ${request.issue.number}`)
         const build = await getVSTSTypeScriptClient().getBuildApi();
         log("Got VSTS Client's Build API")
@@ -87,7 +87,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
             project: { id: typeScriptProjectId },
             sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
             sourceVersion: ``, // Also undocumented
-            parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
+            parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser, status_comment: commentId }), // This API is real bad
         }));
         buildParams.templateParameters = JSON.parse(buildParams.parameters);
         log(`Final template parameters after augmentation: ${JSON.stringify(buildParams.templateParameters)}`)
@@ -107,7 +107,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
  * @param {(x: PipelineRunArgs) => (Promise<PipelineRunArgs> | PipelineRunArgs)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
 async function makeNewPipelineRunWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
-    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr) => {
+    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
         log(`Trigger pipeline ${definitionId} on ${request.issue.number}`)
         const build = await getVSTSTypeScriptClient().getBuildApi();
         log("Got VSTS Client's Build API")
@@ -133,6 +133,7 @@ async function makeNewPipelineRunWithComments(request, suiteName, definitionId, 
             templateParameters: {
                 source_issue: pr.number,
                 requesting_user: requestingUser,
+                status_comment: commentId,
             }
         }
         args = await buildTriggerAugmentor(args);
@@ -150,7 +151,7 @@ async function makeNewPipelineRunWithComments(request, suiteName, definitionId, 
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
- * @param {(pr: any) => Promise<string>} buildTrigger
+ * @param {(pr: any, commentId: number) => Promise<string>} buildTrigger
  */
 async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
     log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
@@ -168,7 +169,7 @@ async function commentAndTriggerBuild(request, suiteName, definitionId, log, bui
     });
     const commentId = result.data.id;
     log(`Created new "started running" comment ${commentId}`)
-    const buildUrl = await buildTrigger(pr);
+    const buildUrl = await buildTrigger(pr, commentId);
     log(`Build done queueing`)
     await cli.issues.updateComment({
         owner: "microsoft",
@@ -307,6 +308,29 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/pack this/, action(async (request, log) => await makeNewBuildWithComments(request, "tarball bundle task", 19, log)))
     .set(/perf test(?: this)?(?! this)(?! faster)/, action(async (request, log) => await makeNewBuildWithComments(request, "perf test suite", 22, log, p => ({...p, queue: { id: 22 }}))))
     .set(/perf test(?: this)? faster/, action(async (request, log) => await makeNewBuildWithComments(request, "abridged perf test suite", 45, log, p => ({...p, queue: { id: 22 }}))))
+    .set(/new perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
+        const preset = match[1] || "regular";
+
+        await makeNewPipelineRunWithComments(request, `${preset} perf test suite`, 69, log, p => {
+            // makeNewPipelineRunWithComments assumes that the pipeline is defined on TypeScript,
+            // but this pipeline is defined on typescript-benchmarking, so we move the self reference
+            // over to TypeScript (the name known to the benchmark pipeline).
+            const self = p.resources?.repositories?.self;
+            assert(self);
+            return {
+                ...p,
+                resources: {
+                    repositories: {
+                        TypeScript: self,
+                    }
+                },
+                templateParameters: {
+                    ...p.templateParameters,
+                    tsperf_preset: preset,
+                }
+            }
+        });
+    }))
     .set(/run dt(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, log, async p => ({
         ...p,
         parameters: JSON.stringify({
