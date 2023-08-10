@@ -48,22 +48,6 @@ function getVSTSTypeScriptClient() {
  *   sourceVersion: string;
  *   parameters: string;
  * }} BuildVars
- * 
- * @typedef {{
- *     resources?: {
- *         repositories?: Record<string, { refName?: string; version?: string } | undefined>;
- *     };
- *     variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
- *     templateParameters?: Record<string, string | number | boolean | undefined>;
- *     queue?: undefined;
- *     sourceBranch?: undefined;
- *     sourceVersion?: undefined;
- *     parameters?: undefined;
- * }} PipelineRunArgs
- * 
- * @typedef {{
- *     _links: { web: { href: string }; };
- * }} PipelineRunResult
  */
 
 /**
@@ -96,6 +80,20 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
     })
 }
 
+
+/**
+ * @typedef {{
+ *     resources?: {
+ *         repositories?: Record<string, { refName?: string; version?: string } | undefined>;
+ *     };
+ *     variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
+ *     templateParameters?: Record<string, string | number | boolean | undefined>;
+ *     queue?: undefined;
+ *     sourceBranch?: undefined;
+ *     sourceVersion?: undefined;
+ *     parameters?: undefined;
+ * }} PipelineRunArgs
+ */
 
 /**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
