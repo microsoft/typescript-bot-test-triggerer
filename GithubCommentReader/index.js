@@ -35,15 +35,15 @@ function getVSTSTypeScriptClient() {
 
 /**
  * @typedef {{
- *   resources?: {
- *     repositories?: Record<string, { refName?: string; version?: string } | undefined>;
- *   };
- *   variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
- *   templateParameters?: Record<string, string | number | boolean | undefined>;
+ *     resources?: {
+ *         repositories?: Record<string, { refName?: string; version?: string } | undefined>;
+ *     };
+ *     variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
+ *     templateParameters?: Record<string, string | number | boolean | undefined>;
  * }} PipelineRunArgs
  * 
  * @typedef {{
- *   _links: { web: { href: string }; };
+ *     _links: { web: { href: string }; };
  * }} PipelineRunResult
  */
 
