@@ -307,7 +307,8 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/perf test(?: this)?(?! this)(?! faster)/, action(async (request, log) => await makeNewBuildWithComments(request, "perf test suite", 22, log, p => ({...p, queue: { id: 22 }}))))
     .set(/perf test(?: this)? faster/, action(async (request, log) => await makeNewBuildWithComments(request, "abridged perf test suite", 45, log, p => ({...p, queue: { id: 22 }}))))
     .set(/new perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
-        const preset = match[1] || "regular";
+        let preset = match[1] || "regular";
+        if (preset === "faster") preset = "tsc-only";
 
         await makeNewPipelineRunWithComments(request, `${preset} perf test suite`, 69, log, p => {
             // makeNewPipelineRunWithComments assumes that the pipeline is defined on TypeScript,
