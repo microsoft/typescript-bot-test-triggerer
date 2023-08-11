@@ -19,6 +19,8 @@ function getGHClient() {
     }
 }
 
+const typeScriptProjectId = "cf7ac146-d525-443c-b23c-0d58337efebc";
+
 function getVSTSTypeScriptClient() {
     if (clients.vstsTypescript) {
         return clients.vstsTypescript;
@@ -29,6 +31,42 @@ function getVSTSTypeScriptClient() {
         clients.vstsTypescript = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getPersonalAccessTokenHandler(token));
         return clients.vstsTypescript;
     }
+}
+
+/**
+ * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
+ * and update the comment with the build log URL.
+ * @param {*} request The request object
+ * @param {string} suiteName The frindly name to call the suite in the associated comment
+ * @param {number} definitionId The VSTS id of the build definition to trigger
+ * @param {(s: string) => void} log
+ * @param {(pr: Client.Octokit.PullsGetResponse, commentId: number) => Promise<string>} buildTrigger
+ */
+async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
+    log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
+    const cli = getGHClient();
+    log("Got github client")
+    const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+    log(`Got pr for ${request.issue.number}`)
+    const refSha = pr.head.sha;
+    const requestingUser = request.comment.user.login;
+    const result = await cli.issues.createComment({
+        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
+        issue_number: pr.number,
+        owner: "microsoft",
+        repo: "TypeScript"
+    });
+    const commentId = result.data.id;
+    log(`Created new "started running" comment ${commentId}`)
+    const buildUrl = await buildTrigger(pr, commentId);
+    log(`Build done queueing`)
+    await cli.issues.updateComment({
+        owner: "microsoft",
+        repo: "TypeScript",
+        comment_id: commentId,
+        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildUrl}).`
+    });
+    log(`Updated to "build is queued" comment ${commentId}`)
 }
 
 /**
@@ -58,56 +96,86 @@ function getVSTSTypeScriptClient() {
  * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
 async function makeNewBuildWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
-    log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
-    const cli = getGHClient();
-    log("Got github client")
-    const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
-    log(`Got pr for ${request.issue.number}`)
-    const refSha = pr.head.sha;
-    const requestingUser = request.comment.user.login;
-    const result = await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
-        issue_number: pr.number,
-        owner: "microsoft",
-        repo: "TypeScript"
-    });
-    const commentId = result.data.id;
-    log(`Created new "started running" comment ${commentId}`)
-    const buildQueue = await triggerBuild(request, pr, definitionId, log, p => buildTriggerAugmentor({ ...p, parameters: JSON.stringify({ ...JSON.parse(p.parameters), status_comment: commentId }) }));
-    log(`Build done queueing`)
-    await cli.issues.updateComment({
-        owner: "microsoft",
-        repo: "TypeScript",
-        comment_id: commentId,
-        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildQueue._links.web.href}).`
-    });
-    log(`Updated to "build is queued" comment ${commentId}`)
+    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
+        log(`Trigger build ${definitionId} on ${request.issue.number}`)
+        const build = await getVSTSTypeScriptClient().getBuildApi();
+        log("Got VSTS Client's Build API")
+        const requestingUser = request.comment.user.login;
+        let buildParams = /** @type BuildVars & { templateParameters: Record<string, string> } */ (await buildTriggerAugmentor({
+            definition: { id: definitionId },
+            queue: { id: 26 },
+            project: { id: typeScriptProjectId },
+            sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
+            sourceVersion: ``, // Also undocumented
+            parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser, status_comment: commentId }), // This API is real bad
+        }));
+        buildParams.templateParameters = JSON.parse(buildParams.parameters);
+        log(`Final template parameters after augmentation: ${JSON.stringify(buildParams.templateParameters)}`)
+        const response = await build.queueBuild(buildParams, "TypeScript");
+        return response._links.web.href;
+    })
 }
 
+
 /**
- * Authenticate with vsts and schedule the build
+ * @typedef {{
+ *     resources?: {
+ *         repositories?: Record<string, { refName?: string; version?: string } | undefined>;
+ *     };
+ *     variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
+ *     templateParameters?: Record<string, string | number | boolean | undefined>;
+ *     queue?: undefined;
+ *     sourceBranch?: undefined;
+ *     sourceVersion?: undefined;
+ *     parameters?: undefined;
+ * }} PipelineRunArgs
+ */
+
+/**
+ * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
+ * and update the comment with the build log URL.
  * @param {*} request The request object
- * @param {*} pr The github PR data object
+ * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
- * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ * @param {(x: PipelineRunArgs) => (Promise<PipelineRunArgs> | PipelineRunArgs)} buildTriggerAugmentor maps the intial build request into an enhanced one
  */
-async function triggerBuild(request, pr, definitionId, log, buildTriggerAugmentor = p => p) {
-    log(`Trigger build ${definitionId} on ${request.issue.number}`)
-    const build = await getVSTSTypeScriptClient().getBuildApi();
-    log("Got VSTS Client's Build API")
-    const requestingUser = request.comment.user.login;
-    let buildParams = /** @type BuildVars & { templateParameters: Record<string, string> } */ (await buildTriggerAugmentor({
-        definition: { id: definitionId },
-        queue: { id: 26 },
-        project: { id: "cf7ac146-d525-443c-b23c-0d58337efebc" },
-        sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
-        sourceVersion: ``, // Also undocumented
-        parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser }), // This API is real bad
-    }));
-    buildParams.templateParameters = JSON.parse(buildParams.parameters);
-    log(`Final template parameters after augmentation: ${JSON.stringify(buildParams.templateParameters)}`)
-    return await build.queueBuild(buildParams, "TypeScript");
+async function makeNewPipelineRunWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
+    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
+        log(`Trigger pipeline ${definitionId} on ${request.issue.number}`)
+        const build = await getVSTSTypeScriptClient().getBuildApi();
+        log("Got VSTS Client's Build API")
+
+        // The new pipelines API is not yet supported by the node client, so we have to do this manually.
+        // The request was reverse engineered from the HTTP requests made by the azure devops UI, the node client, and the Go client (which has implemented this).
+        // https://github.com/microsoft/azure-devops-go-api/blob/8dbf8bfd3346f337d914961fab01df812985dcb8/azuredevops/v7/pipelines/client.go#L446
+        const verData = await build.vsoClient.getVersioningData("7.1-preview.1", "pipelines", "7859261e-d2e9-4a68-b820-a5d84cc5bb3d", { project: typeScriptProjectId, pipelineId: definitionId });
+        const url = verData.requestUrl;
+        const options = build.createRequestOptions('application/json', verData.apiVersion);
+        assert(url);
+
+        const requestingUser = request.comment.user.login;
+        /** @type {PipelineRunArgs} */
+        let args = {
+            resources: {
+                repositories: {
+                    self: {
+                        refName: `refs/pull/${pr.number}/merge`,
+                    }
+                }
+            },
+            templateParameters: {
+                source_issue: pr.number,
+                requesting_user: requestingUser,
+                status_comment: commentId,
+            }
+        }
+        args = await buildTriggerAugmentor(args);
+
+        log(`Final template parameters after augmentation: ${JSON.stringify(args)}`)
+        const response = await build.rest.create(url, args, options);
+        return response.result._links.web.href;
+    })
 }
 
 /**
@@ -238,6 +306,30 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/pack this/, action(async (request, log) => await makeNewBuildWithComments(request, "tarball bundle task", 19, log)))
     .set(/perf test(?: this)?(?! this)(?! faster)/, action(async (request, log) => await makeNewBuildWithComments(request, "perf test suite", 22, log, p => ({...p, queue: { id: 22 }}))))
     .set(/perf test(?: this)? faster/, action(async (request, log) => await makeNewBuildWithComments(request, "abridged perf test suite", 45, log, p => ({...p, queue: { id: 22 }}))))
+    .set(/new perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
+        let preset = match[1] || "regular";
+        if (preset === "faster") preset = "tsc-only";
+
+        await makeNewPipelineRunWithComments(request, `${preset} perf test suite`, 69, log, p => {
+            // makeNewPipelineRunWithComments assumes that the pipeline is defined on TypeScript,
+            // but this pipeline is defined on typescript-benchmarking, so we move the self reference
+            // over to TypeScript (the name known to the benchmark pipeline).
+            const self = p.resources?.repositories?.self;
+            assert(self);
+            return {
+                ...p,
+                resources: {
+                    repositories: {
+                        TypeScript: self,
+                    }
+                },
+                templateParameters: {
+                    ...p.templateParameters,
+                    tsperf_preset: preset,
+                }
+            }
+        });
+    }))
     .set(/run dt(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, log, async p => ({
         ...p,
         parameters: JSON.stringify({
