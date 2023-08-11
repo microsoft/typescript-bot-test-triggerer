@@ -40,7 +40,7 @@ function getVSTSTypeScriptClient() {
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
- * @param {(pr: any, commentId: number) => Promise<string>} buildTrigger
+ * @param {(pr: Client.Octokit.PullsGetResponse, commentId: number) => Promise<string>} buildTrigger
  */
 async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
     log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
