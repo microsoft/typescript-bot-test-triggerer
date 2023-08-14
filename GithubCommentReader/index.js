@@ -304,9 +304,7 @@ function action(task, relationships = ["MEMBER", "OWNER", "COLLABORATOR"], prOnl
 const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/run dt slower/, action(async (request, log) => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18, log)))
     .set(/pack this/, action(async (request, log) => await makeNewBuildWithComments(request, "tarball bundle task", 19, log)))
-    .set(/perf test(?: this)?(?! this)(?! faster)/, action(async (request, log) => await makeNewBuildWithComments(request, "perf test suite", 22, log, p => ({...p, queue: { id: 22 }}))))
-    .set(/perf test(?: this)? faster/, action(async (request, log) => await makeNewBuildWithComments(request, "abridged perf test suite", 45, log, p => ({...p, queue: { id: 22 }}))))
-    .set(/new perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
+    .set(/(?:new )?perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
         let preset = match[1] || "regular";
         if (preset === "faster") preset = "tsc-only";
 
