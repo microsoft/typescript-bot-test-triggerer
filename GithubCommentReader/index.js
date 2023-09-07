@@ -522,6 +522,13 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         await triggerGHActionWithComment(request, "run-twoslash-repros", { number: issueNumber || prNumber || undefined }, `run the code sample repros`);
     }, undefined, false));
 
+
+const botCall = "@typescript-bot";
+for (const [key, value] of [...commands.entries()]) {
+    commands.delete(key);
+    commands.set(new RegExp(`${botCall} ${key.source}`, "i"), value);
+}
+
 /**
  * @param {*} context 
  * @param {*} data 
@@ -565,6 +572,11 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     if (!body) {
         return undefined;
     }
+
+    if (!body.includes(botCall)) {
+        return undefined;
+    }
+
     const applicableActions = Array.from(commands.entries()).filter(e => {
         if (!isPr && e[1].prOnly) {
             return false;
@@ -574,20 +586,22 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     if (!applicableActions.length) {
         return undefined;
     }
-    const botCall = "@typescript-bot";
-    if (body.indexOf(botCall) !== -1) {
-        context.log(`Bot reference detected in '${body}'`);
-    }
+
     /** @type {((req: any) => Promise<void>)[]} */
     let results = [];
-    for (const [key, action] of applicableActions) {
-        const fullRe = new RegExp(`${botCall} ${key.source}`, "i");
-        if (fullRe.test(body)) {
-            const match = fullRe.exec(body);
-            assert(match);
-            results.push(r => action.task(r, s => context.log(s), match));
+
+    const lines = new Set(body.split("\n").map(s => s.trim()).filter(s => s));
+    for (const line of lines) {
+        for (const [key, action] of applicableActions) {
+            if (key.test(line)) {
+                const match = key.exec(line);
+                assert(match);
+                results.push(r => action.task(r, s => context.log(s), match));
+                break;
+            }
         }
     }
+
     if (!results.length) {
         return undefined;
     }
