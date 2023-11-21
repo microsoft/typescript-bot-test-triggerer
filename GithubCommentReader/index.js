@@ -406,7 +406,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             pr: request.issue.number,
             target_branch: targetBranch,
             requesting_user: requestingUser,
-        }, `create the \`${targetBranch}\` branch`);
+        }, `cherry-pick this into \`${targetBranch}\``);
     }))
     .set(/create release-([\d\.]+)/, action(async (request, log, match) => {
         const cli = getGHClient();
