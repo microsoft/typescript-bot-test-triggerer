@@ -381,6 +381,27 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, action(async (request, log, match) => {
         const targetBranch = match[1];
         const requestingUser = request.comment.user.login;
+
+        const cli = getGHClient();
+        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        try {
+            await cli.git.getRef({
+                owner: "Microsoft",
+                repo: "TypeScript",
+                ref: `heads/${targetBranch}`
+            });
+        }
+        catch (_) {
+            const requestingUser = request.comment.user.login;
+            await cli.issues.createComment({
+                body: `Heya @${requestingUser}, I couldn't find the branch '${targetBranch}' on Microsoft/TypeScript. You may need to make it and try again.`,
+                issue_number: pr.number,
+                owner: "Microsoft",
+                repo: "TypeScript"
+            });
+            return;
+        }
+
         await triggerGHActionWithComment(request, "create-cherry-pick-pr", {
             pr: request.issue.number,
             target_branch: targetBranch,
