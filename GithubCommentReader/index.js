@@ -269,7 +269,6 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/pack this/, action(async (request, log) => await makeNewBuildWithComments(request, "tarball bundle task", 19, log)))
     .set(/(?:new )?perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
         let preset = match[1] || "regular";
-        if (preset === "faster") preset = "tsc-only";
 
         await makeNewPipelineRunWithComments(request, `${preset} perf test suite`, 69, log, p => {
             // makeNewPipelineRunWithComments assumes that the pipeline is defined on TypeScript,
