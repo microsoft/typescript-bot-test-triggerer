@@ -10,12 +10,16 @@
   "author": "",
   "license": "SEE LICENSE IN ASSOCIATED REPO",
   "packageManager": "npm@8.19.4",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "@octokit/rest": "^16",
-    "azure-devops-node-api": "^11.0.0"
+    "@azure/functions": "^4.2.0",
+    "@octokit/rest": "^20.0.2",
+    "azure-devops-node-api": "^12.4.0"
   },
   "devDependencies": {
-    "@types/node": "^20.4.8",
-    "typescript": "^5.1.6"
+    "@types/node": "^18.19.14",
+    "typescript": "^5.3.3"
   }
 }

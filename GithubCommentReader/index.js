@@ -40,7 +40,7 @@ function getVSTSTypeScriptClient() {
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
- * @param {(pr: Client.Octokit.PullsGetResponse, commentId: number) => Promise<string>} buildTrigger
+ * @param {(pr: Client.RestEndpointMethodTypes["pulls"]["get"]["response"]["data"], commentId: number) => Promise<string>} buildTrigger
  */
 async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
     log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
@@ -181,7 +181,7 @@ async function makeNewPipelineRunWithComments(request, suiteName, definitionId, 
 /**
  * @param {any} request
  * @param {string} event
- * @param {object} payload
+ * @param {Record<string, unknown>} payload
  */
 async function triggerGHAction(request, event, payload) {
     const cli = getGHClient();
@@ -217,7 +217,7 @@ async function sleep(duration) {
 /**
  * @param {any} request
  * @param {string} event
- * @param {object} payload
+ * @param {Record<string, unknown>} payload
  * @param {string} message
  */
 async function triggerGHActionWithComment(request, event, payload, message) {
@@ -228,7 +228,7 @@ async function triggerGHActionWithComment(request, event, payload, message) {
     // this improves our odds of findings the new run, rather than the old one
     // TODO: If GH ever makes the `repository_dispatch` event actually return the scheduled jobs,
     // use that info here
-    const workflow = await cli.actions.listRepoWorkflowRuns({
+    const workflow = await cli.actions.listWorkflowRunsForRepo({
         owner: "microsoft",
         repo: "TypeScript",
         branch: "main",
@@ -303,7 +303,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
 
         return {...p, parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
-            target_fork: pr.head.repo.owner.login,
+            target_fork: pr.head.repo?.owner.login,
             target_branch: pr.head.ref
         })};
     })))
@@ -461,13 +461,13 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             });
             return;
         }
-        const contentResponse = await cli.repos.getContents({
+        const contentResponse = await cli.repos.getContent({
             owner: "microsoft",
             repo: "TypeScript",
             ref: targetBranch,
             path: "package.json"
         });
-        if (Array.isArray(contentResponse.data) || !contentResponse.data.content) {
+        if (Array.isArray(contentResponse.data) || contentResponse.data.type !== "file" || !contentResponse.data.content) {
             await cli.issues.createComment({
                 body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to have a \`package.json\` I can look up its current version in.`,
                 issue_number: request.issue.number,
