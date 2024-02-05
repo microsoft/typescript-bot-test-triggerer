@@ -579,14 +579,13 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     return async (req) => { await Promise.all(results.map(r => r(req))) };
 }
 
-const webhookToken = process.env.WEBHOOK_TOKEN;
-assert(webhookToken, "WEBHOOK_TOKEN is not set")
-
 app.http('GithubCommentReader', {
     handler: async (data, context) => {
         const body = await data.text();
 
         const sig = data.headers.get("x-hub-signature-256");
+        const webhookToken = process.env.WEBHOOK_TOKEN;
+        assert(webhookToken, "WEBHOOK_TOKEN is not set")
         if (!sig || !verifyWebhook(webhookToken, body, `sha256=${sig}`)) {
             return {};
         }
