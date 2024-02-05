@@ -580,10 +580,10 @@ function matchesCommand(context, body, isPr, authorAssociation) {
 }
 
 app.http('GithubCommentReader', {
-    handler: async (data, context) => {
-        const body = await data.text();
+    handler: async (request, context) => {
+        const body = await request.text();
 
-        const sig = data.headers.get("x-hub-signature-256");
+        const sig = request.headers.get("x-hub-signature-256");
         const webhookToken = process.env.WEBHOOK_TOKEN;
         assert(webhookToken, "WEBHOOK_TOKEN is not set")
         if (!sig || !verifyWebhook(webhookToken, body, `sha256=${sig}`)) {
