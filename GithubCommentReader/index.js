@@ -36,22 +36,32 @@ function getVSTSTypeScriptClient() {
 }
 
 /**
+ * @typedef {{
+ *     issueNumber: number;
+ *     isPr: boolean;
+ *     requestingUser: string;
+ *     statusCommentId: number;
+ * }} RequestInfo
+ */
+void 0;
+
+/**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
  * and update the comment with the build log URL.
- * @param {*} request The request object
+ * @param {RequestInfo} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
  * @param {(pr: Client.RestEndpointMethodTypes["pulls"]["get"]["response"]["data"], commentId: number) => Promise<string>} buildTrigger
  */
 async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
-    log(`New build for ${suiteName} (${definitionId}) on ${request.issue.number}`)
+    log(`New build for ${suiteName} (${definitionId}) on ${request.issueNumber}`)
     const cli = getGHClient();
     log("Got github client")
-    const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
-    log(`Got pr for ${request.issue.number}`)
+    const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+    log(`Got pr for ${request.issueNumber}`)
     const refSha = pr.head.sha;
-    const requestingUser = request.comment.user.login;
+    const requestingUser = request.requestingUser;
     const result = await cli.issues.createComment({
         body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
         issue_number: pr.number,
@@ -91,7 +101,7 @@ async function commentAndTriggerBuild(request, suiteName, definitionId, log, bui
 /**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
  * and update the comment with the build log URL.
- * @param {*} request The request object
+ * @param {RequestInfo} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
@@ -99,10 +109,10 @@ async function commentAndTriggerBuild(request, suiteName, definitionId, log, bui
  */
 async function makeNewBuildWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
     await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
-        log(`Trigger build ${definitionId} on ${request.issue.number}`)
+        log(`Trigger build ${definitionId} on ${request.issueNumber}`)
         const build = await getVSTSTypeScriptClient().getBuildApi();
         log("Got VSTS Client's Build API")
-        const requestingUser = request.comment.user.login;
+        const requestingUser = request.requestingUser;
         let buildParams = /** @type BuildVars & { templateParameters: Record<string, string> } */ (await buildTriggerAugmentor({
             definition: { id: definitionId },
             queue: { id: 26 },
@@ -136,7 +146,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
 /**
  * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
  * and update the comment with the build log URL.
- * @param {*} request The request object
+ * @param {RequestInfo} request The request object
  * @param {string} suiteName The frindly name to call the suite in the associated comment
  * @param {number} definitionId The VSTS id of the build definition to trigger
  * @param {(s: string) => void} log
@@ -144,7 +154,7 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
  */
 async function makeNewPipelineRunWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
     await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
-        log(`Trigger pipeline ${definitionId} on ${request.issue.number}`)
+        log(`Trigger pipeline ${definitionId} on ${request.issueNumber}`)
         const build = await getVSTSTypeScriptClient().getBuildApi();
         log("Got VSTS Client's Build API")
 
@@ -156,7 +166,7 @@ async function makeNewPipelineRunWithComments(request, suiteName, definitionId, 
         const options = build.createRequestOptions('application/json', verData.apiVersion);
         assert(url);
 
-        const requestingUser = request.comment.user.login;
+        const requestingUser = request.requestingUser;
         /** @type {PipelineRunArgs} */
         let args = {
             resources: {
@@ -181,13 +191,13 @@ async function makeNewPipelineRunWithComments(request, suiteName, definitionId, 
 }
 
 /**
- * @param {any} request
+ * @param {RequestInfo} request
  * @param {string} event
  * @param {Record<string, unknown>} payload
  */
 async function triggerGHAction(request, event, payload) {
     const cli = getGHClient();
-    const requestingUser = request.comment.user.login;
+    const requestingUser = request.requestingUser;
     try {
         await cli.repos.createDispatchEvent({
             owner: "microsoft",
@@ -199,7 +209,7 @@ async function triggerGHAction(request, event, payload) {
     catch (err) {
         await cli.issues.createComment({
             body: `Heya @${requestingUser}, I couldn't dispatch the ${event} event`,
-            issue_number: request.issue.number,
+            issue_number: request.issueNumber,
             owner: "microsoft",
             repo: "TypeScript"
         });
@@ -217,7 +227,7 @@ async function sleep(duration) {
 }
 
 /**
- * @param {any} request
+ * @param {RequestInfo} request
  * @param {string} event
  * @param {Record<string, unknown>} payload
  * @param {string} message
@@ -236,10 +246,10 @@ async function triggerGHActionWithComment(request, event, payload, message) {
         branch: "main",
         event: "repository_dispatch"
     });
-    const requestingUser = request.comment.user.login;
+    const requestingUser = request.requestingUser;
     await cli.issues.createComment({
         body: `Heya @${requestingUser}, I've started to ${message} for you. [Here's the link to my best guess at the log](${workflow.data.workflow_runs[0].html_url}).`,
-        issue_number: request.issue.number,
+        issue_number: request.issueNumber,
         owner: "microsoft",
         repo: "TypeScript"
     });
@@ -247,13 +257,13 @@ async function triggerGHActionWithComment(request, event, payload, message) {
 
 /**
  * @typedef {Object} CommentAction
- * @property {(req: any, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
+ * @property {(req: RequestInfo, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
  * @property {("MEMBER" | "OWNER" | "COLLABORATOR")[]} relationships
  * @property {boolean} prOnly
  */
 
 /**
- * @param {(req: any, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
+ * @param {(req: RequestInfo, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
  * @param {("MEMBER" | "OWNER" | "COLLABORATOR")[]=} relationships
  * @param {boolean=} prOnly
  * @returns {CommentAction}
@@ -301,7 +311,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     }))))
     .set(/user test this slower/, action(async (request, log) => await makeNewBuildWithComments(request, "community code test suite", 24, log, async p => {
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
 
         return {...p, parameters: JSON.stringify({
             ...JSON.parse(p.parameters),
@@ -311,7 +321,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     })))
     .set(/user test this(?: inline)?(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
 
         return {
             ...p,
@@ -326,7 +336,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     })))
     .set(/user test tsserver/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite (tsserver)", 47, log, async p => {
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
 
         return {
             ...p,
@@ -343,7 +353,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     })))
     .set(/test top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite", 47, log, async p => {
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
         const numRepos = +match[1];
 
         return {
@@ -361,7 +371,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     })))
     .set(/test tsserver top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite (tsserver)", 47, log, async p => {
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
         const numRepos = +match[1];
 
         return {
@@ -381,10 +391,10 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     })))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, action(async (request, log, match) => {
         const targetBranch = match[1];
-        const requestingUser = request.comment.user.login;
+        const requestingUser = request.requestingUser;
 
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issue.number, owner: "microsoft", repo: "TypeScript" })).data;
+        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
         try {
             await cli.git.getRef({
                 owner: "Microsoft",
@@ -393,7 +403,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             });
         }
         catch (_) {
-            const requestingUser = request.comment.user.login;
+            const requestingUser = request.requestingUser;
             await cli.issues.createComment({
                 body: `Heya @${requestingUser}, I couldn't find the branch '${targetBranch}' on Microsoft/TypeScript. You may need to make it and try again.`,
                 issue_number: pr.number,
@@ -404,7 +414,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         }
 
         await triggerGHActionWithComment(request, "create-cherry-pick-pr", {
-            pr: request.issue.number,
+            pr: request.issueNumber,
             target_branch: targetBranch,
             requesting_user: requestingUser,
         }, `cherry-pick this into \`${targetBranch}\``);
@@ -426,10 +436,10 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         }
         if (targetBranchExists) {
             // If there's no error, call it off, the branch already exists
-            const requestingUser = request.comment.user.login;
+            const requestingUser = request.requestingUser;
             await cli.issues.createComment({
                 body: `Heya @${requestingUser}, the branch '${targetBranch}' already seems to exist on microsoft/TypeScript. You should prepare it for the release by hand.`,
-                issue_number: request.issue.number,
+                issue_number: request.issueNumber,
                 owner: "Microsoft",
                 repo: "TypeScript"
             });
@@ -445,7 +455,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
     .set(/bump release-([\d\.]+)/, action(async (request, log, match) => {
         const cli = getGHClient();
         const targetBranch = `release-${match[1]}`;
-        const requestingUser = request.comment.user.login;
+        const requestingUser = request.requestingUser;
         try {
             await cli.git.getRef({
                 owner: "Microsoft",
@@ -457,7 +467,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             // Branch does not exist
             await cli.issues.createComment({
                 body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to exist on microsoft/TypeScript.`,
-                issue_number: request.issue.number,
+                issue_number: request.issueNumber,
                 owner: "Microsoft",
                 repo: "TypeScript"
             });
@@ -472,7 +482,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         if (Array.isArray(contentResponse.data) || contentResponse.data.type !== "file" || !contentResponse.data.content) {
             await cli.issues.createComment({
                 body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to have a \`package.json\` I can look up its current version in.`,
-                issue_number: request.issue.number,
+                issue_number: request.issueNumber,
                 owner: "Microsoft",
                 repo: "TypeScript"
             });
@@ -487,7 +497,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         catch (_) {
             await cli.issues.createComment({
                 body: `Heya @${requestingUser}, the branch '${targetBranch}' had a \`package.json\`, but it didn't seem to be valid JSON.`,
-                issue_number: request.issue.number,
+                issue_number: request.issueNumber,
                 owner: "Microsoft",
                 repo: "TypeScript"
             });
@@ -510,9 +520,7 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         }, `sync \`${branch}\` with main`);
     }, undefined, false))
     .set(/run repros/, action(async (request, log, match) => {
-        const issueNumber = request.issue && request.issue.number
-        const prNumber = request.pull_request && request.pull_request.number
-        await triggerGHActionWithComment(request, "run-twoslash-repros", { number: issueNumber || prNumber || undefined }, `run the code sample repros`);
+        await triggerGHActionWithComment(request, "run-twoslash-repros", { number: request.issueNumber }, `run the code sample repros`);
     }, undefined, false));
 
 
@@ -526,7 +534,7 @@ for (const [key, value] of [...commands.entries()]) {
  * @param {string} body
  * @param {boolean} isPr
  * @param {string} authorAssociation
- * @returns {undefined | ((req: any) => Promise<any>)}
+ * @returns {undefined | ((req: RequestInfo) => Promise<void>)}
  */
 function matchesCommand(context, body, isPr, authorAssociation) {
     if (!body) {
@@ -547,7 +555,7 @@ function matchesCommand(context, body, isPr, authorAssociation) {
         return undefined;
     }
 
-    /** @type {((req: any) => Promise<void>)[]} */
+    /** @type {((req: RequestInfo) => Promise<void>)[]} */
     let results = [];
 
     const lines = new Set(body.split("\n").map(s => s.trim()).filter(s => s));
@@ -568,7 +576,7 @@ function matchesCommand(context, body, isPr, authorAssociation) {
     if (results.length === 1) {
         return results[0];
     }
-    return req => Promise.all(results.map(r => r(req)));
+    return async (req) => { await Promise.all(results.map(r => r(req))) };
 }
 
 const webhookToken = process.env.WEBHOOK_TOKEN;
@@ -587,19 +595,35 @@ app.http('GithubCommentReader', {
         const event = JSON.parse(body);
         context.log("Inspecting comment...");
 
-        const isNewCommentWithBody = "action" in event && event.action === "created" && ("issue" in event || "pull_request" in event) && event.comment.body;
-        if (!isNewCommentWithBody) {
+        const isNewComment = "action" in event
+            && (event.action === "created" || event.action === "submitted")
+            && ("issue" in event || "pull_request" in event);
+        if (!isNewComment) {
             return {};
         }
 
-        const isPr = !!("pull_request" in event && event.pull_request) || !!("issue" in event && event.issue && event.issue.pull_request);
-        const command = matchesCommand(context, event.comment.body, isPr, event.comment.author_association);
+        const comment = "comment" in event ? event.comment : event.review;
+        if (!comment.body) {
+            return {};
+        }
+
+        const isPr = !!("pull_request" in event && event.pull_request)
+            || !!("issue" in event && event.issue && event.issue.pull_request);
+
+        const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
+
+        const command = matchesCommand(context, comment.body, isPr, comment.author_association);
         if (!command) {
             return {};
         }
 
-        context.log('GitHub Webhook triggered!', event.comment.body);
-        await command(event);
+        context.log('GitHub Webhook triggered!', comment.body);
+        await command({
+            issueNumber,
+            isPr,
+            requestingUser: comment.user.login,
+            statusCommentId: comment.id
+        });
 
         return {};
     },
