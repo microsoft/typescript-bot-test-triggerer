@@ -529,6 +529,55 @@ for (const [key, value] of [...commands.entries()]) {
     commands.delete(key);
     commands.set(new RegExp(`${botCall} ${key.source}`, "i"), value);
 }
+
+/** @type {import("@azure/functions").HttpHandler} */
+async function handler(request, context) {
+    const body = await request.text();
+
+    const sig = request.headers.get("x-hub-signature-256");
+    const webhookToken = process.env.WEBHOOK_TOKEN;
+    assert(webhookToken, "WEBHOOK_TOKEN is not set")
+    if (!sig || !verifyWebhook(webhookToken, body, `sha256=${sig}`)) {
+        return {};
+    }
+
+    /** @type {import("@octokit/webhooks-types").WebhookEvent} */
+    const event = JSON.parse(body);
+    context.log("Inspecting comment...");
+
+    const isNewComment = "action" in event
+        && (event.action === "created" || event.action === "submitted")
+        && ("issue" in event || "pull_request" in event);
+    if (!isNewComment) {
+        return {};
+    }
+
+    const comment = "comment" in event ? event.comment : event.review;
+    if (!comment.body) {
+        return {};
+    }
+
+    const isPr = !!("pull_request" in event && event.pull_request)
+        || !!("issue" in event && event.issue && event.issue.pull_request);
+
+    const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
+
+    const command = matchesCommand(context, comment.body, isPr, comment.author_association);
+    if (!command) {
+        return {};
+    }
+
+    context.log('GitHub Webhook triggered!', comment.body);
+    await command({
+        issueNumber,
+        isPr,
+        requestingUser: comment.user.login,
+        statusCommentId: comment.id
+    });
+
+    return {};
+}
+
 /**
  * @param {import("@azure/functions").InvocationContext} context
  * @param {string} body
@@ -580,50 +629,5 @@ function matchesCommand(context, body, isPr, authorAssociation) {
 }
 
 app.http('GithubCommentReader', {
-    handler: async (request, context) => {
-        const body = await request.text();
-
-        const sig = request.headers.get("x-hub-signature-256");
-        const webhookToken = process.env.WEBHOOK_TOKEN;
-        assert(webhookToken, "WEBHOOK_TOKEN is not set")
-        if (!sig || !verifyWebhook(webhookToken, body, `sha256=${sig}`)) {
-            return {};
-        }
-
-        /** @type {import("@octokit/webhooks-types").WebhookEvent} */
-        const event = JSON.parse(body);
-        context.log("Inspecting comment...");
-
-        const isNewComment = "action" in event
-            && (event.action === "created" || event.action === "submitted")
-            && ("issue" in event || "pull_request" in event);
-        if (!isNewComment) {
-            return {};
-        }
-
-        const comment = "comment" in event ? event.comment : event.review;
-        if (!comment.body) {
-            return {};
-        }
-
-        const isPr = !!("pull_request" in event && event.pull_request)
-            || !!("issue" in event && event.issue && event.issue.pull_request);
-
-        const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
-
-        const command = matchesCommand(context, comment.body, isPr, comment.author_association);
-        if (!command) {
-            return {};
-        }
-
-        context.log('GitHub Webhook triggered!', comment.body);
-        await command({
-            issueNumber,
-            isPr,
-            requestingUser: comment.user.login,
-            statusCommentId: comment.id
-        });
-
-        return {};
-    },
+    handler,
 });
