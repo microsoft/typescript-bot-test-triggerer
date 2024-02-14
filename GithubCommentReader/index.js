@@ -1,11 +1,11 @@
 const { app } = require("@azure/functions");
 const { verify: verifyWebhook } = require("@octokit/webhooks-methods");
-const Client = require("@octokit/rest");
+const { Octokit } = require("octokit");
 const vsts = require("azure-devops-node-api");
 const assert = require("assert");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
-/** @type {{GH?: Client.Octokit, vstsTypescript?: vsts.WebApi, vstsDevdiv?: vsts.WebApi}} */
+/** @type {{GH?: Octokit["rest"], vstsTypescript?: vsts.WebApi}} */
 let clients = {};
 
 function getGHClient() {
@@ -13,9 +13,9 @@ function getGHClient() {
         return clients.GH;
     }
     else {
-        clients.GH = new Client.Octokit({
-            auth: process.env.GITHUB_TOKEN
-        });
+        const token = process.env.GITHUB_TOKEN;
+        assert(token, "GITHUB_TOKEN must be set");
+        clients.GH = new Octokit({ auth: token }).rest;
         return clients.GH;
     }
 }
@@ -42,7 +42,6 @@ async function sleep(ms) {
         setTimeout(r, ms);
     });
 }
-
 
 /**
  * @typedef {import("@octokit/webhooks-types").AuthorAssociation} AuthorAssociation
