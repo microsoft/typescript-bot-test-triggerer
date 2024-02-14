@@ -483,10 +483,6 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
     }, undefined, false))
 
 const botCall = "@typescript-bot";
-for (const [key, value] of [...commands.entries()]) {
-    commands.delete(key);
-    commands.set(new RegExp(`${botCall} ${key.source}`, "i"), value);
-}
 
 /**
  * @param {string} distinctId
