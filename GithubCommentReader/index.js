@@ -243,14 +243,6 @@ async function createWorkflowDispatch({ workflowId, info, inputs }) {
 
 
 const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
-    .set(/run dt slower/, createCommand((request) => {
-        return queueBuild({
-            definitionId: 18,
-            sourceBranch: `refs/pull/${request.issueNumber}/merge`,
-            info: request,
-            inputs: {}
-        })
-    }))
     .set(/pack this/, createCommand((request) => {
         return queueBuild({
             definitionId: 19,
@@ -273,7 +265,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             }
         })
     }))
-    .set(/run dt(?! slower)/, createCommand(async (request) => {
+    .set(/run dt/, createCommand(async (request) => {
         return queueBuild({
             definitionId: 23,
             sourceBranch: `refs/pull/${request.issueNumber}/merge`,
