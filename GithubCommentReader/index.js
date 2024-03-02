@@ -711,7 +711,8 @@ async function handler(request, context) {
     context.log(`Processing comment ${comment.id} on ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`)
 
     await webhook({
-        log: context.log,
+        // The azure functions logger is a getter and crashes if passed directly
+        log: (s) => context.log(s),
         issueNumber,
         commentId: comment.id,
         commentBody: comment.body,
