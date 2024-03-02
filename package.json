@@ -15,9 +15,9 @@
   },
   "dependencies": {
     "@azure/functions": "^4.2.0",
-    "@octokit/rest": "^20.0.2",
     "@octokit/webhooks-methods": "^4.0.0",
-    "azure-devops-node-api": "^12.4.0"
+    "azure-devops-node-api": "^12.4.0",
+    "octokit": "^3.1.2"
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.3.1",

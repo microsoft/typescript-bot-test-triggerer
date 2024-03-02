@@ -1,12 +1,11 @@
 const { app } = require("@azure/functions");
 const { verify: verifyWebhook } = require("@octokit/webhooks-methods");
-const Client = require("@octokit/rest");
+const { Octokit } = require("octokit");
 const vsts = require("azure-devops-node-api");
-const crypto = require("crypto");
 const assert = require("assert");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
-/** @type {{GH?: Client.Octokit, vstsTypescript?: vsts.WebApi, vstsDevdiv?: vsts.WebApi}} */
+/** @type {{GH?: Octokit["rest"], vstsTypescript?: vsts.WebApi}} */
 let clients = {};
 
 function getGHClient() {
@@ -14,9 +13,9 @@ function getGHClient() {
         return clients.GH;
     }
     else {
-        clients.GH = new Client.Octokit({
-            auth: process.env.GITHUB_TOKEN
-        });
+        const token = process.env.GITHUB_TOKEN;
+        assert(token, "GITHUB_TOKEN must be set");
+        clients.GH = new Octokit({ auth: token }).rest;
         return clients.GH;
     }
 }
@@ -36,98 +35,118 @@ function getVSTSTypeScriptClient() {
 }
 
 /**
+ * @param {number} ms
+ */
+async function sleep(ms) {
+    return new Promise(r => {
+        setTimeout(r, ms);
+    });
+}
+
+/**
+ * @typedef {import("@octokit/webhooks-types").AuthorAssociation} AuthorAssociation
+ * @typedef {{ kind: "unresolvedGitHub"; distinctId: string }} UnresolvedGitHubRun
+ * @typedef {{ kind: "resolved"; distinctId: string; url: string }} ResolvedRun
+ * @typedef {{ kind: "error"; distinctId: string; error: string }} ErrorRun
+ * @typedef {UnresolvedGitHubRun | ResolvedRun | ErrorRun} Run
+ * 
  * @typedef {{
- *     issueNumber: number;
+ *     log: (s: string) => void;
+ *     match: RegExpMatchArray;
+ *     distinctId: string;
+ *     issueNumber: number; // TODO(jakebailey): rename this
  *     isPr: boolean;
  *     requestingUser: string;
- *     statusCommentId: number;
+ *     statusCommentId: number; // TODO(jakebailey): rename this
  * }} RequestInfo
+ * @typedef {(request: RequestInfo) => Promise<Run>} CommandFn
+ * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean }} Command
  */
 void 0;
 
 /**
- * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
- * and update the comment with the build log URL.
- * @param {RequestInfo} request The request object
- * @param {string} suiteName The frindly name to call the suite in the associated comment
- * @param {number} definitionId The VSTS id of the build definition to trigger
- * @param {(s: string) => void} log
- * @param {(pr: Client.RestEndpointMethodTypes["pulls"]["get"]["response"]["data"], commentId: number) => Promise<string>} buildTrigger
+ * @param {CommandFn} fn
+ * @param {AuthorAssociation[]} authorAssociations
+ * @param {boolean} prOnly
+ * @returns {Command}
  */
-async function commentAndTriggerBuild(request, suiteName, definitionId, log, buildTrigger) {
-    log(`New build for ${suiteName} (${definitionId}) on ${request.issueNumber}`)
-    const cli = getGHClient();
-    log("Got github client")
-    const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
-    log(`Got pr for ${request.issueNumber}`)
-    const refSha = pr.head.sha;
-    const requestingUser = request.requestingUser;
-    const result = await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I'm starting to run the ${suiteName} on this PR at ${refSha}. Hold tight - I'll update this comment with the log link once the build has been queued.`,
-        issue_number: pr.number,
-        owner: "microsoft",
-        repo: "TypeScript"
-    });
-    const commentId = result.data.id;
-    log(`Created new "started running" comment ${commentId}`)
-    const buildUrl = await buildTrigger(pr, commentId);
-    log(`Build done queueing`)
-    await cli.issues.updateComment({
-        owner: "microsoft",
-        repo: "TypeScript",
-        comment_id: commentId,
-        body: `Heya @${requestingUser}, I've started to run the ${suiteName} on this PR at ${refSha}. You can monitor the build [here](${buildUrl}).`
-    });
-    log(`Updated to "build is queued" comment ${commentId}`)
+function createCommand(fn, authorAssociations = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true) {
+    return { fn, authorAssociations, prOnly };
 }
 
 /**
  * @typedef {{
- *   definition: {
- *       id: number;
- *   };
- *   queue: {
- *       id: number;
- *   };
- *   project: {
- *       id: string;
- *   };
- *   sourceBranch: string;
- *   sourceVersion: string;
- *   parameters: string;
+ *     definition: {
+ *         id: number;
+ *     };
+ *     project: {
+ *         id: string;
+ *     };
+ *     sourceBranch: string;
+ *     sourceVersion: string;
+ *     parameters: string;
+ *     templateParameters: Record<string, string>
  * }} BuildVars
  */
+void 0;
 
 /**
- * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
- * and update the comment with the build log URL.
- * @param {RequestInfo} request The request object
- * @param {string} suiteName The frindly name to call the suite in the associated comment
- * @param {number} definitionId The VSTS id of the build definition to trigger
- * @param {(s: string) => void} log
- * @param {(x: BuildVars) => (Promise<BuildVars> | BuildVars)} buildTriggerAugmentor maps the intial build request into an enhanced one
+ * @param {RequestInfo} info
+ * @param {Record<string, string>} inputs
  */
-async function makeNewBuildWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
-    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
-        log(`Trigger build ${definitionId} on ${request.issueNumber}`)
-        const build = await getVSTSTypeScriptClient().getBuildApi();
-        log("Got VSTS Client's Build API")
-        const requestingUser = request.requestingUser;
-        let buildParams = /** @type BuildVars & { templateParameters: Record<string, string> } */ (await buildTriggerAugmentor({
-            definition: { id: definitionId },
-            queue: { id: 26 },
-            project: { id: typeScriptProjectId },
-            sourceBranch: `refs/pull/${pr.number}/merge`, // Undocumented, but used by the official frontend
-            sourceVersion: ``, // Also undocumented
-            parameters: JSON.stringify({ source_issue: pr.number, requesting_user: requestingUser, status_comment: commentId }), // This API is real bad
-        }));
-        buildParams.templateParameters = JSON.parse(buildParams.parameters);
-        log(`Final template parameters after augmentation: ${JSON.stringify(buildParams.templateParameters)}`)
-        const response = await build.queueBuild(buildParams, "TypeScript");
-        return response._links.web.href;
-    })
+function createParameters(info, inputs) {
+    /** @type {Record<string, string>} */
+    const parameters = {
+        distinct_id: info.distinctId,
+        source_issue: `${info.issueNumber}`,
+        requesting_user: info.requestingUser,
+        status_comment: `${info.statusCommentId}`,
+    };
+
+    const requiredParameters = Object.keys(parameters);
+    const confliciting = Object.keys(inputs).filter((key) => requiredParameters.includes(key));
+    assert(confliciting.length === 0, `Inputs conflict with required parameters: ${confliciting.join(", ")}`);
+
+    Object.assign(parameters, inputs);
+
+    return parameters;
 }
 
+/**
+ * This queues a build using the legacy AzDO build API.
+ * 
+ * @typedef {{
+ *    definitionId: number;
+ *    sourceBranch: string;
+ *    info: RequestInfo;
+ *    inputs: Record<string, string>;
+ * }} QueueBuildRequest
+ * 
+ * @param {QueueBuildRequest} arg
+ * @returns {Promise<ResolvedRun>}
+ */
+async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
+    const parameters = createParameters(info, inputs);
+
+    /** @type {BuildVars} */
+    const buildParams = {
+        definition: { id: definitionId },
+        project: { id: typeScriptProjectId },
+        sourceBranch, // Undocumented, but used by the official frontend
+        sourceVersion: ``, // Also undocumented
+        parameters: JSON.stringify(parameters), // This API is real bad
+        templateParameters: parameters,
+    };
+
+    info.log(`Trigger build ${definitionId} on ${info.issueNumber}`)
+    const build = await getVSTSTypeScriptClient().getBuildApi();
+    const response = await build.queueBuild(buildParams, "TypeScript");
+    return {
+        kind: "resolved",
+        distinctId: info.distinctId,
+        url: response._links.web.href
+    };
+}
 
 /**
  * @typedef {{
@@ -144,257 +163,182 @@ async function makeNewBuildWithComments(request, suiteName, definitionId, log, b
  */
 
 /**
- * Authenticate with github and vsts, make a comment saying what's being done, then schedule the build
- * and update the comment with the build log URL.
- * @param {RequestInfo} request The request object
- * @param {string} suiteName The frindly name to call the suite in the associated comment
- * @param {number} definitionId The VSTS id of the build definition to trigger
- * @param {(s: string) => void} log
- * @param {(x: PipelineRunArgs) => (Promise<PipelineRunArgs> | PipelineRunArgs)} buildTriggerAugmentor maps the intial build request into an enhanced one
- */
-async function makeNewPipelineRunWithComments(request, suiteName, definitionId, log, buildTriggerAugmentor = p => p) {
-    await commentAndTriggerBuild(request, suiteName, definitionId, log, async (pr, commentId) => {
-        log(`Trigger pipeline ${definitionId} on ${request.issueNumber}`)
-        const build = await getVSTSTypeScriptClient().getBuildApi();
-        log("Got VSTS Client's Build API")
+ * This queues a build using the AzDO Pipelines API.
+ * 
+ * @typedef {{
+*    definitionId: number;
+*    repositories: Record<string, { refName?: string; version?: string } | undefined>
+*    info: RequestInfo;
+*    inputs: Record<string, string>;
+* }} CreatePipelineRunRequest
+* 
+* @param {CreatePipelineRunRequest} arg
+* @returns {Promise<ResolvedRun>}
+*/
+async function createPipelineRun({ definitionId, repositories, info, inputs }) {
+    const parameters = createParameters(info, inputs);
 
-        // The new pipelines API is not yet supported by the node client, so we have to do this manually.
-        // The request was reverse engineered from the HTTP requests made by the azure devops UI, the node client, and the Go client (which has implemented this).
-        // https://github.com/microsoft/azure-devops-go-api/blob/8dbf8bfd3346f337d914961fab01df812985dcb8/azuredevops/v7/pipelines/client.go#L446
-        const verData = await build.vsoClient.getVersioningData("7.1-preview.1", "pipelines", "7859261e-d2e9-4a68-b820-a5d84cc5bb3d", { project: typeScriptProjectId, pipelineId: definitionId });
-        const url = verData.requestUrl;
-        const options = build.createRequestOptions('application/json', verData.apiVersion);
-        assert(url);
-
-        const requestingUser = request.requestingUser;
-        /** @type {PipelineRunArgs} */
-        let args = {
-            resources: {
-                repositories: {
-                    self: {
-                        refName: `refs/pull/${pr.number}/merge`,
-                    }
-                }
-            },
-            templateParameters: {
-                source_issue: pr.number,
-                requesting_user: requestingUser,
-                status_comment: commentId,
-            }
-        }
-        args = await buildTriggerAugmentor(args);
-
-        log(`Final template parameters after augmentation: ${JSON.stringify(args)}`)
-        const response = await build.rest.create(url, args, options);
-        return response.result._links.web.href;
-    })
-}
-
-/**
- * @param {RequestInfo} request
- * @param {string} event
- * @param {Record<string, unknown>} payload
- */
-async function triggerGHAction(request, event, payload) {
-    const cli = getGHClient();
-    const requestingUser = request.requestingUser;
-    try {
-        await cli.repos.createDispatchEvent({
-            owner: "microsoft",
-            repo: "TypeScript",
-            event_type: event,
-            client_payload: payload
-        });
+    /** @type {PipelineRunArgs} */
+    const args = {
+        resources: {
+            repositories,
+        },
+        templateParameters: parameters,
     }
-    catch (err) {
-        await cli.issues.createComment({
-            body: `Heya @${requestingUser}, I couldn't dispatch the ${event} event`,
-            issue_number: request.issueNumber,
-            owner: "microsoft",
-            repo: "TypeScript"
-        });
-        return;
-    }
-}
 
-/**
- * @param {number} duration - in seconds
- */
-async function sleep(duration) {
-    return new Promise(r => {
-        setTimeout(r, duration * 1000);
-    });
-}
 
-/**
- * @param {RequestInfo} request
- * @param {string} event
- * @param {Record<string, unknown>} payload
- * @param {string} message
- */
-async function triggerGHActionWithComment(request, event, payload, message) {
-    const cli = getGHClient();
-    await triggerGHAction(request, event, payload);
-    await sleep(2);
-    // we sleep because it takes a bit for the triggered event to cause a new run to appear
-    // this improves our odds of findings the new run, rather than the old one
-    // TODO: If GH ever makes the `repository_dispatch` event actually return the scheduled jobs,
-    // use that info here
-    const workflow = await cli.actions.listWorkflowRunsForRepo({
-        owner: "microsoft",
-        repo: "TypeScript",
-        branch: "main",
-        event: "repository_dispatch"
-    });
-    const requestingUser = request.requestingUser;
-    await cli.issues.createComment({
-        body: `Heya @${requestingUser}, I've started to ${message} for you. [Here's the link to my best guess at the log](${workflow.data.workflow_runs[0].html_url}).`,
-        issue_number: request.issueNumber,
-        owner: "microsoft",
-        repo: "TypeScript"
-    });
-}
+    info.log(`Trigger pipeline ${definitionId} on ${info.issueNumber}`)
+    const build = await getVSTSTypeScriptClient().getBuildApi();
+    // The new pipelines API is not yet supported by the node client, so we have to do this manually.
+    // The request was reverse engineered from the HTTP requests made by the azure devops UI, the node client, and the Go client (which has implemented this).
+    // https://github.com/microsoft/azure-devops-go-api/blob/8dbf8bfd3346f337d914961fab01df812985dcb8/azuredevops/v7/pipelines/client.go#L446
+    const verData = await build.vsoClient.getVersioningData("7.1-preview.1", "pipelines", "7859261e-d2e9-4a68-b820-a5d84cc5bb3d", { project: typeScriptProjectId, pipelineId: definitionId });
+    const url = verData.requestUrl;
+    const options = build.createRequestOptions('application/json', verData.apiVersion);
+    assert(url);
 
-/**
- * @typedef {Object} CommentAction
- * @property {(req: RequestInfo, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
- * @property {("MEMBER" | "OWNER" | "COLLABORATOR")[]} relationships
- * @property {boolean} prOnly
- */
-
-/**
- * @param {(req: RequestInfo, log: (s: string) => void, match: RegExpExecArray) => Promise<void>} task
- * @param {("MEMBER" | "OWNER" | "COLLABORATOR")[]=} relationships
- * @param {boolean=} prOnly
- * @returns {CommentAction}
- */
-function action(task, relationships = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true) {
+    const response = await build.rest.create(url, args, options);
     return {
-        task,
-        relationships,
-        prOnly
+        kind: "resolved",
+        distinctId: info.distinctId,
+        url: response.result._links.web.href,
     };
 }
 
-const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
-    .set(/run dt slower/, action(async (request, log) => await makeNewBuildWithComments(request, "Definitely Typed test suite", 18, log)))
-    .set(/pack this/, action(async (request, log) => await makeNewBuildWithComments(request, "tarball bundle task", 19, log)))
-    .set(/(?:new )?perf test(?: this)?(?: (\S+)?)?/, action(async (request, log, match) => {
-        let preset = match[1] || "regular";
+/**
+ * @param {string} workflowId
+ * @param {{ distinct_id: string; issue_number: string; status_comment_id: string }} info
+ * @param {Record<string, string>} inputs
+ */
 
-        await makeNewPipelineRunWithComments(request, `${preset} perf test suite`, 69, log, p => {
-            // makeNewPipelineRunWithComments assumes that the pipeline is defined on TypeScript,
-            // but this pipeline is defined on typescript-benchmarking, so we move the self reference
-            // over to TypeScript (the name known to the benchmark pipeline).
-            const self = p.resources?.repositories?.self;
-            assert(self);
-            return {
-                ...p,
-                resources: {
-                    repositories: {
-                        TypeScript: self,
-                    }
-                },
-                templateParameters: {
-                    ...p.templateParameters,
-                    tsperf_preset: preset,
-                }
-            }
-        });
-    }))
-    .set(/run dt(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "parallelized Definitely Typed test suite", 23, log, async p => ({
-        ...p,
-        parameters: JSON.stringify({
-            ...JSON.parse(p.parameters),
-            DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
+/**
+ * This queues a build using the AzDO Pipelines API.
+ * 
+ * @typedef {{
+*    workflowId: string;
+*    info: RequestInfo;
+*    inputs: Record<string, string>;
+* }} CreateWorkflowDispatchRequest
+* 
+* @param {CreateWorkflowDispatchRequest} arg
+* @returns {Promise<UnresolvedGitHubRun>}
+*/
+async function createWorkflowDispatch({ workflowId, info, inputs }) {
+    const parameters = createParameters(info, inputs);
+
+    const cli = getGHClient();
+    await cli.actions.createWorkflowDispatch({
+        owner: "microsoft",
+        repo: "TypeScript",
+        ref: "main",
+        workflow_id: workflowId,
+        inputs: parameters,
+    });
+
+    return {
+        kind: "unresolvedGitHub",
+        distinctId: info.distinctId
+    }
+}
+
+
+const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
+    .set(/pack this/, createCommand((request) => {
+        return queueBuild({
+            definitionId: 19,
+            sourceBranch: `refs/pull/${request.issueNumber}/merge`,
+            info: request,
+            inputs: {}
         })
-    }))))
-    .set(/user test this slower/, action(async (request, log) => await makeNewBuildWithComments(request, "community code test suite", 24, log, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
-
-        return {...p, parameters: JSON.stringify({
-            ...JSON.parse(p.parameters),
-            target_fork: pr.head.repo?.owner.login,
-            target_branch: pr.head.ref
-        })};
-    })))
-    .set(/user test this(?: inline)?(?! slower)/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite", 47, log, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
-
-        return {
-            ...p,
+    }))
+    .set(/(?:new )?perf test(?: this)?(?: (\S+)?)?/, createCommand((request) => {
+        return createPipelineRun({
+            definitionId: 69,
+            repositories: {
+                TypeScript: {
+                    refName: `refs/pull/${request.issueNumber}/merge`,
+                }
+            },
+            info: request,
+            inputs: {
+                tsperf_preset: request.match[1] || "regular",
+            }
+        })
+    }))
+    .set(/run dt/, createCommand(async (request) => {
+        return queueBuild({
+            definitionId: 23,
+            sourceBranch: `refs/pull/${request.issueNumber}/merge`,
+            info: request,
+            inputs: {
+                DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
+            }
+        })
+    }))
+    .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
+        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        return queueBuild({
+            definitionId: 47,
             sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
-                post_result: true,
+            info: request,
+            inputs: {
+                post_result: "true",
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref
-            })
-        };
-    })))
-    .set(/user test tsserver/, action(async (request, log) => await makeNewBuildWithComments(request, "diff-based user code test suite (tsserver)", 47, log, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
-
-        return {
-            ...p,
+            }
+        })
+    }))
+    .set(/user test tsserver/, createCommand(async (request) => {
+        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        return queueBuild({
+            definitionId: 47,
             sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
-                post_result: true,
+            info: request,
+            inputs: {
+                post_result: "true",
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 entrypoint: "tsserver",
-                prng_seed: pr.id,
-            })
-        };
-    })))
-    .set(/test top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite", 47, log, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
-        const numRepos = +match[1];
-
-        return {
-            ...p,
+                prng_seed: `${pr.id}`,
+            }
+        })
+    }))
+    .set(/test top(\d{1,3})/, createCommand(async (request) => {
+        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        return queueBuild({
+            definitionId: 47,
             sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
-                post_result: true,
+            info: request,
+            inputs: {
+                post_result: "true",
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
-                top_repos: true,
-                repo_count: numRepos,
-            })
-        };
-    })))
-    .set(/test tsserver top(\d{1,3})/, action(async (request, log, match) => await makeNewBuildWithComments(request, "diff-based top-repos suite (tsserver)", 47, log, async p => {
-        const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
-        const numRepos = +match[1];
-
-        return {
-            ...p,
+                top_repos: "true",
+                repo_count: request.match[1]
+            }
+        })
+    }))
+    .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
+        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        return queueBuild({
+            definitionId: 47,
             sourceBranch: "",
-            parameters: JSON.stringify({
-                ...JSON.parse(p.parameters),
-                post_result: true,
+            info: request,
+            inputs: {
+                post_result: "true",
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
-                top_repos: true,
-                repo_count: numRepos,
+                top_repos: "true",
+                repo_count: request.match[1],
                 entrypoint: "tsserver",
-                prng_seed: pr.id,
-            })
-        };
-    })))
-    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, action(async (request, log, match) => {
-        const targetBranch = match[1];
-        const requestingUser = request.requestingUser;
+                prng_seed: `${pr.id}`,
+            }
+        })
+    }))
+    .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
+        const targetBranch = request.match[1];
 
         const cli = getGHClient();
-        const pr = (await cli.pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
         try {
             await cli.git.getRef({
                 owner: "Microsoft",
@@ -403,28 +347,27 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             });
         }
         catch (_) {
-            const requestingUser = request.requestingUser;
-            await cli.issues.createComment({
-                body: `Heya @${requestingUser}, I couldn't find the branch '${targetBranch}' on Microsoft/TypeScript. You may need to make it and try again.`,
-                issue_number: pr.number,
-                owner: "Microsoft",
-                repo: "TypeScript"
-            });
-            return;
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `Branch \`${targetBranch}\` does not exist.`
+            }
         }
 
-        await triggerGHActionWithComment(request, "create-cherry-pick-pr", {
-            pr: request.issueNumber,
-            target_branch: targetBranch,
-            requesting_user: requestingUser,
-        }, `cherry-pick this into \`${targetBranch}\``);
+        return createWorkflowDispatch({
+            workflowId: "create-cherry-pick-pr.yml",
+            info: request,
+            inputs: {
+                pr: `${request.issueNumber}`,
+                target_branch: targetBranch,
+            }
+        })
     }))
-    .set(/create release-([\d\.]+)/, action(async (request, log, match) => {
-        const cli = getGHClient();
-        const targetBranch = `release-${match[1]}`;
+    .set(/create release-([\d\.]+)/, createCommand(async (request) => {
+        const targetBranch = `release-${request.match[1]}`;
         let targetBranchExists = false;
         try {
-            await cli.git.getRef({
+            await getGHClient().git.getRef({
                 owner: "Microsoft",
                 repo: "TypeScript",
                 ref: `heads/${targetBranch}`
@@ -435,27 +378,26 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             // OK, we expect an error
         }
         if (targetBranchExists) {
-            // If there's no error, call it off, the branch already exists
-            const requestingUser = request.requestingUser;
-            await cli.issues.createComment({
-                body: `Heya @${requestingUser}, the branch '${targetBranch}' already seems to exist on microsoft/TypeScript. You should prepare it for the release by hand.`,
-                issue_number: request.issueNumber,
-                owner: "Microsoft",
-                repo: "TypeScript"
-            });
-            return;
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `Branch \`${targetBranch}\` already exists.`
+            }
         }
-        await triggerGHActionWithComment(request, "new-release-branch", {
-            package_version: `${match[1]}.0-beta`,
-            core_major_minor: match[1],
-            core_tag: "beta",
-            branch_name: targetBranch
-        }, `create the \`${targetBranch}\` branch`);
+        return createWorkflowDispatch({
+            workflowId: "new-release-branch.yaml",
+            info: request,
+            inputs: {
+                package_version: `${request.match[1]}.0-beta`,
+                core_major_minor: request.match[1],
+                core_tag: "beta",
+                branch_name: targetBranch
+            }
+        })
     }, undefined, false))
-    .set(/bump release-([\d\.]+)/, action(async (request, log, match) => {
+    .set(/bump release-([\d\.]+)/, createCommand(async (request) => {
         const cli = getGHClient();
-        const targetBranch = `release-${match[1]}`;
-        const requestingUser = request.requestingUser;
+        const targetBranch = `release-${request.match[1]}`;
         try {
             await cli.git.getRef({
                 owner: "Microsoft",
@@ -465,13 +407,11 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
         }
         catch (_) {
             // Branch does not exist
-            await cli.issues.createComment({
-                body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to exist on microsoft/TypeScript.`,
-                issue_number: request.issueNumber,
-                owner: "Microsoft",
-                repo: "TypeScript"
-            });
-            return;
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `Branch \`${targetBranch}\` does not exist.`
+            }
         }
         const contentResponse = await cli.repos.getContent({
             owner: "microsoft",
@@ -480,13 +420,11 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             path: "package.json"
         });
         if (Array.isArray(contentResponse.data) || contentResponse.data.type !== "file" || !contentResponse.data.content) {
-            await cli.issues.createComment({
-                body: `Heya @${requestingUser}, the branch '${targetBranch}' does not seem to have a \`package.json\` I can look up its current version in.`,
-                issue_number: request.issueNumber,
-                owner: "Microsoft",
-                repo: "TypeScript"
-            });
-            return;
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `Branch \`${targetBranch}\` does not have a package.json`
+            }
         }
         /** @type {string} */
         let currentVersion;
@@ -495,39 +433,236 @@ const commands = (/** @type {Map<RegExp, CommentAction>} */(new Map()))
             currentVersion = packageContent.version;
         }
         catch (_) {
-            await cli.issues.createComment({
-                body: `Heya @${requestingUser}, the branch '${targetBranch}' had a \`package.json\`, but it didn't seem to be valid JSON.`,
-                issue_number: request.issueNumber,
-                owner: "Microsoft",
-                repo: "TypeScript"
-            });
-            return;
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `Branch \`${targetBranch}\` has an invalid package.json`
+            }
         }
         const parts = currentVersion.split(".");
         const majorMinor = parts.slice(0, 2).join(".");
         // > X.X.0-beta -> X.X.1-rc -> X.X.2 -> X.X.3
         const new_version = `${majorMinor}.${currentVersion.indexOf("beta") >= 0 ? "1-rc" : currentVersion.indexOf("rc") >= 0 ? "2" : (Number(parts[2]) + 1)}`;
-        await triggerGHActionWithComment(request, "set-version", {
-            package_version: new_version,
-            core_major_minor: majorMinor,
-            branch_name: targetBranch
-        }, `update the version number on \`${targetBranch}\` to \`${new_version}\``);
-    }, undefined, false))
-    .set(/sync release-([\d\.]+)/, action(async (request, log, match) => {
-        const branch = `release-${match[1]}`;
-        await triggerGHActionWithComment(request, "sync-branch", {
-            branch_name: branch
-        }, `sync \`${branch}\` with main`);
-    }, undefined, false))
-    .set(/run repros/, action(async (request, log, match) => {
-        await triggerGHActionWithComment(request, "run-twoslash-repros", { number: request.issueNumber }, `run the code sample repros`);
-    }, undefined, false));
 
+        return createWorkflowDispatch({
+            workflowId: "set-version.yaml",
+            info: request,
+            inputs: {
+                package_version: new_version,
+                core_major_minor: majorMinor,
+                branch_name: targetBranch
+            }
+        })
+    }, undefined, false))
+    .set(/sync release-([\d\.]+)/, createCommand(async (request) => {
+        const branch = `release-${request.match[1]}`;
+        return createWorkflowDispatch({
+            workflowId: "sync-branch.yaml",
+            info: request,
+            inputs: {
+                branch_name: branch
+            }
+        })
+    }, undefined, false))
+    .set(/run repros/, createCommand(async (request) => {
+        return createWorkflowDispatch({
+            workflowId: "run-twoslash-repros.yaml",
+            info: request,
+            inputs: {
+                number: `${request.issueNumber}`
+            }
+        })
+    }, undefined, false))
 
 const botCall = "@typescript-bot";
-for (const [key, value] of [...commands.entries()]) {
-    commands.delete(key);
-    commands.set(new RegExp(`${botCall} ${key.source}`, "i"), value);
+
+/**
+ * @param {string} distinctId
+ */
+function getStatusPlaceholder(distinctId) {
+    return `<!--status-${distinctId}-start-->🔄<!--status-${distinctId}-end-->`;
+}
+
+/**
+ * @param {string} distinctId
+ */
+function getResultPlaceholder(distinctId) {
+    // This string is known to other workflows/pipelines. Do not change without updating everything.
+    return `<!--result-${distinctId}-->`;
+}
+
+/**
+ * @typedef {{
+ *     log: (s: string) => void;
+ *     issueNumber: number;
+ *     commentId: number;
+ *     commentBody: string;
+ *     isPr: boolean;
+ *     commentUser: string;
+ *     authorAssociation: AuthorAssociation
+ * }} WebhookParams 
+ * @param {WebhookParams} params */
+async function webhook(params) {
+    const log = params.log;
+    const cli = getGHClient();
+
+    const lines = params.commentBody.split("\n").map((line) => line.trim());
+
+    const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
+        if (!params.isPr && command.prOnly) {
+            return false;
+        }
+        return command.authorAssociations.includes(params.authorAssociation);
+    });
+
+    if (applicableCommands.length === 0) {
+        return;
+    }
+
+    let commandsToRun = [];
+
+    for (let line of lines) {
+        if (!line.startsWith(botCall)) {
+            continue;
+        }
+        line = line.slice(botCall.length).trim();
+
+        for (const [key, command] of applicableCommands) {
+            const match = key.exec(line);
+            if (!match) {
+                continue;
+            }
+            commandsToRun.push({ name: line, match, fn: command.fn });
+        }
+    }
+
+    if (commandsToRun.length === 0) {
+        return;
+    }
+
+    const start = Date.now();
+    const created = `>=${new Date(start).toISOString()}`;
+
+    const commandInfos = commandsToRun.map((obj, index) => ({ ...obj, distinctId: `${params.commentId}-${index}` }));
+
+    const statusCommentBody = `
+Starting jobs; this comment will be updated as builds start and complete.
+
+| Command | Status | Results |
+| ------- | ------ | ------- |
+${
+        commandInfos.map(({ name, distinctId }) =>
+            `| \`${name}\` | ${getStatusPlaceholder(distinctId)} | ${getResultPlaceholder(distinctId)} |`
+        )
+            .join("\n")
+    }
+`.trim();
+
+    const statusComment = await cli.issues.createComment({
+        owner: "microsoft",
+        repo: "TypeScript",
+        issue_number: params.issueNumber,
+        body: statusCommentBody,
+    });
+
+    const statusCommentId = statusComment.data.id;
+
+    /** @type {Run[]} */
+    const startedRuns = await Promise.all(commandInfos.map(async ({ match, fn, distinctId }) => {
+        try {
+            return await fn({
+                match,
+                distinctId,
+                issueNumber: params.issueNumber,
+                statusCommentId: statusCommentId,
+                requestingUser: params.commentUser,
+                isPr: params.isPr,
+                log: log,
+            });
+        } catch (e) {
+            // TODO: short error message
+            return { kind: "error", distinctId, error: `${e}` };
+        }
+    }));
+
+    async function updateComment() {
+        const comment = await cli.issues.getComment({
+            owner: "microsoft",
+            repo: "TypeScript",
+            comment_id: statusCommentId,
+        });
+
+        const originalBody = comment.data.body;
+        let body = comment.data.body;
+        assert(body);
+
+        for (const run of startedRuns) {
+            const toReplace = getStatusPlaceholder(run.distinctId);
+            let replacement;
+
+            switch (run.kind) {
+                case "unresolvedGitHub":
+                    // Do nothing
+                    break;
+                case "resolved":
+                    replacement = `[✅ Started](${run.url})`;
+                    break;
+                case "error":
+                    replacement = `❌ Error: ${run.error}`;
+                    break;
+            }
+
+            if (replacement) {
+                body = body.replace(toReplace, replacement);
+            }
+        }
+
+        if (body === originalBody) {
+            return;
+        }
+
+        await cli.issues.updateComment({
+            owner: "microsoft",
+            repo: "TypeScript",
+            comment_id: statusCommentId,
+            body,
+        });
+    }
+
+    await updateComment();
+    log("Updated comment with build links");
+
+    // Emperically, this process only takes 2-3 seconds to complete,
+    // but stick a limit on it just in case.
+    for (let i = 0; i < 50; i++) {
+        if (!startedRuns.some((run) => run.kind === "unresolvedGitHub")) {
+            break;
+        }
+
+        await sleep(500);
+
+        const response = await cli.actions.listWorkflowRunsForRepo({
+            owner: "microsoft",
+            repo: "TypeScript",
+            created,
+            exclude_pull_requests: true,
+        });
+        const runs = response.data.workflow_runs;
+
+        for (const [i, run] of startedRuns.entries()) {
+            if (run.kind === "unresolvedGitHub") {
+                const match = runs.find((candidate) => candidate.name?.includes(run.distinctId));
+                if (match) {
+                    startedRuns[i] = { kind: "resolved", distinctId: run.distinctId, url: match.html_url };
+                }
+            }
+        }
+    }
+
+    log("Found runs");
+
+    await updateComment();
+    log("Updated comment with build links");
 }
 
 /** @type {import("@azure/functions").HttpHandler} */
@@ -562,70 +697,17 @@ async function handler(request, context) {
 
     const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
 
-    const command = matchesCommand(context, comment.body, isPr, comment.author_association);
-    if (!command) {
-        return {};
-    }
-
-    context.log('GitHub Webhook triggered!', comment.body);
-    await command({
+    await webhook({
+        log: context.log,
         issueNumber,
+        commentId: comment.id,
+        commentBody: comment.body,
         isPr,
-        requestingUser: comment.user.login,
-        statusCommentId: comment.id
+        commentUser: comment.user.login,
+        authorAssociation: comment.author_association,
     });
 
     return {};
-}
-
-/**
- * @param {import("@azure/functions").InvocationContext} context
- * @param {string} body
- * @param {boolean} isPr
- * @param {string} authorAssociation
- * @returns {undefined | ((req: RequestInfo) => Promise<void>)}
- */
-function matchesCommand(context, body, isPr, authorAssociation) {
-    if (!body) {
-        return undefined;
-    }
-
-    if (!body.includes(botCall)) {
-        return undefined;
-    }
-
-    const applicableActions = Array.from(commands.entries()).filter(e => {
-        if (!isPr && e[1].prOnly) {
-            return false;
-        }
-        return e[1].relationships.some(r => r === authorAssociation);
-    });
-    if (!applicableActions.length) {
-        return undefined;
-    }
-
-    /** @type {((req: RequestInfo) => Promise<void>)[]} */
-    let results = [];
-
-    const lines = new Set(body.split("\n").map(s => s.trim()).filter(s => s));
-    for (const line of lines) {
-        for (const [key, action] of applicableActions) {
-            if (key.test(line)) {
-                const match = key.exec(line);
-                assert(match);
-                results.push(r => action.task(r, s => context.log(s), match));
-                break;
-            }
-        }
-    }
-
-    if (!results.length) {
-        return undefined;
-    }
-    if (results.length === 1) {
-        return results[0];
-    }
-    return async (req) => { await Promise.all(results.map(r => r(req))) };
 }
 
 app.http('GithubCommentReader', {
