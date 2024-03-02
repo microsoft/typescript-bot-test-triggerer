@@ -708,6 +708,8 @@ async function handler(request, context) {
 
     const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
 
+    context.log(`Processing comment ${comment.id} on ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`)
+
     await webhook({
         log: context.log,
         issueNumber,
