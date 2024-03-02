@@ -516,9 +516,11 @@ async function webhook(params) {
     });
 
     if (applicableCommands.length === 0) {
+        log("No applicable commands");
         return;
     }
 
+    /** @type {{ name: string; match: RegExpExecArray; fn: CommandFn; }[]} */
     let commandsToRun = [];
 
     for (let line of lines) {
@@ -536,9 +538,11 @@ async function webhook(params) {
         }
     }
 
+    log(`Found ${commandsToRun.length} commands to run`);
     if (commandsToRun.length === 0) {
         return;
     }
+
 
     const start = Date.now();
     const created = `>=${new Date(start).toISOString()}`;
@@ -558,6 +562,7 @@ ${
     }
 `.trim();
 
+    log("Creating status comment");
     const statusComment = await cli.issues.createComment({
         owner: "microsoft",
         repo: "TypeScript",
@@ -567,6 +572,7 @@ ${
 
     const statusCommentId = statusComment.data.id;
 
+    log("Starting runs...")
     /** @type {Run[]} */
     const startedRuns = await Promise.all(commandInfos.map(async ({ match, fn, distinctId }) => {
         try {
@@ -585,6 +591,8 @@ ${
             return { kind: "error", distinctId, error: `${e}` };
         }
     }));
+
+    log("Runs started");
 
     async function updateComment() {
         const comment = await cli.issues.getComment({
@@ -685,11 +693,13 @@ async function handler(request, context) {
         && (event.action === "created" || event.action === "submitted")
         && ("issue" in event || "pull_request" in event);
     if (!isNewComment) {
+        context.log("Not a new comment")
         return {};
     }
 
     const comment = "comment" in event ? event.comment : event.review;
     if (!comment.body) {
+        context.log("No comment body")
         return {};
     }
 
