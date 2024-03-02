@@ -581,6 +581,7 @@ ${
             });
         } catch (e) {
             // TODO: short error message
+            log(/** @type {any} */(e)?.stack)
             return { kind: "error", distinctId, error: `${e}` };
         }
     }));
