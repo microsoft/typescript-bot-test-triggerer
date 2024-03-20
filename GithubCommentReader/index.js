@@ -314,7 +314,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 top_repos: "true",
-                repo_count: Math.max(+request.match[1], 400)
+                repo_count: `${Math.max(+request.match[1], 400)}`,
             }
         })
     }))
@@ -329,7 +329,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 old_ts_repo_url: pr.base.repo.clone_url,
                 old_head_ref: pr.base.ref,
                 top_repos: "true",
-                repo_count: Math.max(+request.match[1], 200),
+                repo_count: `${Math.max(+request.match[1], 200)}`,
                 entrypoint: "tsserver",
                 prng_seed: `${pr.id}`,
             }
