@@ -514,11 +514,12 @@ async function webhook(params) {
     const log = params.log;
     const cli = getGHClient();
 
-    const lines = params.commentBody.split("\n").map((line) => line.trim());
+    let lines = params.commentBody.split("\n").map((line) => line.trim());
     const testItIndex = lines.indexOf(testItCommand);
     if (testItIndex >= 0) {
         lines.splice(testItIndex, 1, ...testItCommands);
     }
+    lines = [...new Set(lines)];
 
     const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
         if (!params.isPr && command.prOnly) {
