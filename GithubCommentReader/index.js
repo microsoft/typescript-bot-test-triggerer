@@ -151,10 +151,10 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
 /**
  * @typedef {{
  *     resources?: {
- *         repositories?: Record<string, { refName?: string; version?: string } | undefined>;
+ *         repositories?: Record<string, { refName?: string; version?: string }>;
  *     };
- *     variables?: Record<string, { isSecret?: boolean; value?: string; } | undefined>;
- *     templateParameters?: Record<string, string | number | boolean | undefined>;
+ *     variables?: Record<string, { isSecret?: boolean; value?: string; }>;
+ *     templateParameters?: Record<string, string>;
  *     queue?: undefined;
  *     sourceBranch?: undefined;
  *     sourceVersion?: undefined;
@@ -167,7 +167,7 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
  * 
  * @typedef {{
 *    definitionId: number;
-*    repositories: Record<string, { refName?: string; version?: string } | undefined>
+*    repositories: Record<string, { refName?: string; version?: string }>
 *    info: RequestInfo;
 *    inputs: Record<string, string>;
 * }} CreatePipelineRunRequest
@@ -186,22 +186,13 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }) {
         templateParameters: parameters,
     }
 
-
     info.log(`Trigger pipeline ${definitionId} on ${info.issueNumber}`)
-    const build = await getVSTSTypeScriptClient().getBuildApi();
-    // The new pipelines API is not yet supported by the node client, so we have to do this manually.
-    // The request was reverse engineered from the HTTP requests made by the azure devops UI, the node client, and the Go client (which has implemented this).
-    // https://github.com/microsoft/azure-devops-go-api/blob/8dbf8bfd3346f337d914961fab01df812985dcb8/azuredevops/v7/pipelines/client.go#L446
-    const verData = await build.vsoClient.getVersioningData("7.1-preview.1", "pipelines", "7859261e-d2e9-4a68-b820-a5d84cc5bb3d", { project: typeScriptProjectId, pipelineId: definitionId });
-    const url = verData.requestUrl;
-    const options = build.createRequestOptions('application/json', verData.apiVersion);
-    assert(url);
-
-    const response = await build.rest.create(url, args, options);
+    const api = await getVSTSTypeScriptClient().getPipelinesApi();
+    const result = await api.runPipeline(args, typeScriptProjectId, definitionId);
     return {
         kind: "resolved",
         distinctId: info.distinctId,
-        url: response.result._links.web.href,
+        url: result._links.web.href,
     };
 }
 
