@@ -183,7 +183,7 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
 async function createPipelineRun({ definitionId, repositories, info, inputs }) {
     const parameters = createParameters(info, inputs);
 
-    /** @type {PipelineRunArgs} */  
+    /** @type {PipelineRunArgs} */
     const args = {
         resources: {
             repositories,
