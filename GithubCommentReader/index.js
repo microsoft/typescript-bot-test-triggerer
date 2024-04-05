@@ -3,9 +3,10 @@ const { verify: verifyWebhook } = require("@octokit/webhooks-methods");
 const { Octokit } = require("octokit");
 const vsts = require("azure-devops-node-api");
 const assert = require("assert");
+const { ManagedIdentityCredential } = require("@azure/identity");
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
-/** @type {{GH?: Octokit["rest"], vstsTypescript?: vsts.WebApi}} */
+/** @type {{GH?: Octokit["rest"], vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
 let clients = {};
 
 function getGHClient() {
@@ -22,16 +23,20 @@ function getGHClient() {
 
 const typeScriptProjectId = "cf7ac146-d525-443c-b23c-0d58337efebc";
 
-function getVSTSTypeScriptClient() {
+async function getVSTSTypeScriptClient() {
     if (clients.vstsTypescript) {
-        return clients.vstsTypescript;
+        if (Date.now() < (clients.vstsTypescript.expiresAt - 1000 * 60 * 5)) {
+            return clients.vstsTypescript.api;
+        }
     }
-    else {
-        const token = process.env.VSTS_TOKEN;
-        assert(token, "VSTS_TOKEN must be set");
-        clients.vstsTypescript = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getPersonalAccessTokenHandler(token));
-        return clients.vstsTypescript;
-    }
+
+    const identity = new ManagedIdentityCredential();
+    // Scope from https://learn.microsoft.com/en-us/rest/api/azure/devops/tokens/
+    const token = await identity.getToken("499b84ac-1321-427f-aa17-267ca6975798/.default")
+
+    const api = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getBearerHandler(token.token))
+    clients.vstsTypescript = { expiresAt: token.expiresOnTimestamp, api };
+    return api;
 }
 
 /**
@@ -139,7 +144,7 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
     };
 
     info.log(`Trigger build ${definitionId} on ${info.issueNumber}`)
-    const build = await getVSTSTypeScriptClient().getBuildApi();
+    const build = await (await getVSTSTypeScriptClient()).getBuildApi();
     const response = await build.queueBuild(buildParams, "TypeScript");
     return {
         kind: "resolved",
@@ -187,7 +192,7 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }) {
     }
 
     info.log(`Trigger pipeline ${definitionId} on ${info.issueNumber}`)
-    const api = await getVSTSTypeScriptClient().getPipelinesApi();
+    const api = await (await getVSTSTypeScriptClient()).getPipelinesApi();
     const result = await api.runPipeline(args, typeScriptProjectId, definitionId);
     return {
         kind: "resolved",
