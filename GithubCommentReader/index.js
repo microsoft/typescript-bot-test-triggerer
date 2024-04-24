@@ -386,7 +386,6 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             inputs: {
                 package_version: `${request.match[1]}.0-beta`,
                 core_major_minor: request.match[1],
-                core_tag: "beta",
                 branch_name: targetBranch
             }
         })
