@@ -4,7 +4,7 @@ set -exo pipefail
 
 # typescriptbotgithubb162
 
-rm function.zip
+rm -rf function.zip
 zip -r function.zip .
 
 az storage blob upload -f function.zip --account-name typescriptbotgithubb162 -c deployment -n function.zip --overwrite true --auth-mode login
