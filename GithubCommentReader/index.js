@@ -738,3 +738,12 @@ async function handler(request, context) {
 app.http('GithubCommentReader', {
     handler,
 });
+
+// When deployed as a consumption-plan function using only identities for storage,
+// scaling up from zero instances takes more than 10s and causes GitHub to cancel
+// the request. Try and keep the function warm with a 5 minute timer trigger that
+// does nothing.
+app.timer('keepWarm', {
+    schedule: '0 */5 * * * *',
+    handler: () => {},
+});
