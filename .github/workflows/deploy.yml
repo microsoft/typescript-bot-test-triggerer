@@ -1,0 +1,45 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18.x' # set this to the node version to use (supports 8.x, 10.x, 12.x)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ env.NODE_VERSION }} Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 'Resolve Project Dependencies Using Npm'
+        run: |
+          npm install
+          npm run build --if-present
+          npm run test --if-present
+          npm prune --production
+
+      - name: 'Create function.zip'
+        run: zip -r function.zip . -x \*.sh
+
+      - name: 'Az CLI login'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  
+      - name: Upload blob
+        run: az storage blob upload -f function.zip --account-name typescriptbotgithub8c94 -c deployment -n function.zip --overwrite true --auth-mode login
+
+      - name: Restart app
+        run: az functionapp restart -g typescriptbot-github3 -n typescriptbot-github3
