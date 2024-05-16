@@ -500,6 +500,7 @@ const testItCommands = [
  *     issueNumber: number;
  *     commentId: number;
  *     commentBody: string;
+ *     commentIsReview: boolean;
  *     isPr: boolean;
  *     commentUser: string;
  *     authorAssociation: AuthorAssociation
@@ -551,6 +552,18 @@ async function webhook(params) {
         return;
     }
 
+    log(`Reacting to ${params.commentIsReview ? "review" : "comment"} ${params.commentId}`);
+    try {
+        const createReaction = params.commentIsReview ? cli.reactions.createForPullRequestReviewComment : cli.reactions.createForIssueComment;
+        await createReaction({
+            owner: "microsoft",
+            repo: "TypeScript",
+            comment_id: params.commentId,
+            content: "+1",
+        });
+    } catch (e) {
+        log(`Failed to react to comment: ${e}`);
+    }
 
     const start = Date.now();
     const created = `>=${new Date(start).toISOString()}`;
@@ -700,14 +713,17 @@ async function handler(request, context) {
     context.log("Inspecting comment...");
 
     const isNewComment = "action" in event
-        && (event.action === "created" || event.action === "submitted")
-        && ("issue" in event || "pull_request" in event);
+        && (
+            (event.action === "created" && "issue" in event) // issue_comment.created
+            || (event.action === "submitted" && "review" in event) // pull_request_review.submitted
+        )
     if (!isNewComment) {
         context.log("Not a new comment")
         return {};
     }
 
-    const comment = "comment" in event ? event.comment : event.review;
+    const commentIsReview = "comment" in event;
+    const comment = commentIsReview ? event.comment : event.review;
     if (!comment.body) {
         context.log("No comment body")
         return {};
@@ -726,6 +742,7 @@ async function handler(request, context) {
         issueNumber,
         commentId: comment.id,
         commentBody: comment.body,
+        commentIsReview,
         isPr,
         commentUser: comment.user.login,
         authorAssociation: comment.author_association,
