@@ -500,7 +500,7 @@ const testItCommands = [
  *     issueNumber: number;
  *     commentId: number;
  *     commentBody: string;
- *     commentFromIssue: boolean;
+ *     commentIsFromIssue: boolean;
  *     isPr: boolean;
  *     commentUser: string;
  *     authorAssociation: AuthorAssociation
@@ -552,9 +552,9 @@ async function webhook(params) {
         return;
     }
 
-    log(`Reacting to ${params.commentFromIssue ? "issue" : "review"} comment ${params.commentId}`);
+    log(`Reacting to ${params.commentIsFromIssue ? "issue" : "review"} comment ${params.commentId}`);
     try {
-        const createReaction = params.commentFromIssue ? cli.reactions.createForIssueComment : cli.reactions.createForPullRequestReviewComment;
+        const createReaction = params.commentIsFromIssue ? cli.reactions.createForIssueComment : cli.reactions.createForPullRequestReviewComment;
         await createReaction({
             owner: "microsoft",
             repo: "TypeScript",
@@ -722,8 +722,8 @@ async function handler(request, context) {
         return {};
     }
 
-    const commentFromIssue = "comment" in event;
-    const comment = commentFromIssue ? event.comment : event.review;
+    const commentIsFromIssue = "comment" in event;
+    const comment = commentIsFromIssue ? event.comment : event.review;
     if (!comment.body) {
         context.log("No comment body")
         return {};
@@ -742,7 +742,7 @@ async function handler(request, context) {
         issueNumber,
         commentId: comment.id,
         commentBody: comment.body,
-        commentFromIssue,
+        commentIsFromIssue,
         isPr,
         commentUser: comment.user.login,
         authorAssociation: comment.author_association,
