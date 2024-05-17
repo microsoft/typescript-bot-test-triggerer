@@ -538,6 +538,10 @@ async function webhook(params) {
         }
         line = line.slice(botCall.length).trim();
 
+        if (line.startsWith(":")) {
+            line = line.slice(1).trim();
+        }
+
         for (const [key, command] of applicableCommands) {
             const match = key.exec(line);
             if (!match) {
