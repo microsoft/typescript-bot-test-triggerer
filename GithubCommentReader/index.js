@@ -247,7 +247,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             inputs: {}
         })
     }))
-    .set(/(?:new )?perf test(?: this)?(?: (\S+)?)?/, createCommand((request) => {
+    .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createCommand((request) => {
         return createPipelineRun({
             definitionId: 69,
             repositories: {
