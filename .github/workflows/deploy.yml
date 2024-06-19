@@ -42,7 +42,11 @@ jobs:
           path: .
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on:
+      - "self-hosted"
+      - "1ES.Pool=TypeScript-1ES-GitHub"
+      - "1ES.ImageOverride=ubuntu-22.04"
+
     needs: build
     environment:
       name: 'Production'

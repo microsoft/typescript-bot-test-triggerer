@@ -21,7 +21,11 @@ defaults:
       
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
+    runs-on:
+      - "self-hosted"
+      - "1ES.Pool=TypeScript-1ES-GitHub-Deploys"
+      - "1ES.ImageOverride=ubuntu-22.04"
 
     steps:
       - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
