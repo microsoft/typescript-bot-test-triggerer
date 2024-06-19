@@ -24,7 +24,7 @@ jobs:
     # runs-on: ubuntu-latest
     runs-on:
       - "self-hosted"
-      - "1ES.Pool=TypeScript-1ES-GitHub"
+      - "1ES.Pool=TypeScript-1ES-GitHub-typescript-bot"
       - "1ES.ImageOverride=ubuntu-22.04"
 
     steps:
