@@ -492,7 +492,7 @@ const testItCommandToRun = [
     `${botCall} user test this`,
     `${botCall} run dt`,
     `${botCall} perf test this faster`,
-]
+];
 
 /**
  * @typedef {{
@@ -511,13 +511,16 @@ async function webhook(params) {
     const cli = getGHClient();
 
     let lines = params.commentBody.split("\n").map((line) => line.trim());
-    let testItIndex = -1;
-    for (const testItCommand of testItCommands) {
-        testItIndex = lines.indexOf(testItCommand);
-        if (testItIndex >= 0) break;
-    }
-    if (testItIndex >= 0) {
-        lines.splice(testItIndex, 1, ...testItCommandToRun);
+    let hasTestIt = false;
+    lines = lines.filter((line) => {
+        if (testItCommands.includes(line)) {
+            hasTestIt = true;
+            return false;
+        }
+        return true;
+    })
+    if (hasTestIt) {
+        lines = [...lines, ...testItCommandToRun];
     }
     lines = [...new Set(lines)];
 
