@@ -486,13 +486,13 @@ function getResultPlaceholder(distinctId) {
     return `<!--result-${distinctId}-->`;
 }
 
-const testItCommand = `${botCall} test it`;
-const testItCommands = [
+const testItCommands = [`${botCall} test it`, `${botCall} test this`];
+const testItCommandToRun = [
     `${botCall} test top400`,
     `${botCall} user test this`,
     `${botCall} run dt`,
     `${botCall} perf test this faster`,
-]
+];
 
 /**
  * @typedef {{
@@ -511,9 +511,16 @@ async function webhook(params) {
     const cli = getGHClient();
 
     let lines = params.commentBody.split("\n").map((line) => line.trim());
-    const testItIndex = lines.indexOf(testItCommand);
-    if (testItIndex >= 0) {
-        lines.splice(testItIndex, 1, ...testItCommands);
+    let hasTestIt = false;
+    lines = lines.filter((line) => {
+        if (testItCommands.includes(line)) {
+            hasTestIt = true;
+            return false;
+        }
+        return true;
+    })
+    if (hasTestIt) {
+        lines = [...lines, ...testItCommandToRun];
     }
     lines = [...new Set(lines)];
 
