@@ -668,14 +668,10 @@ ${
                     break;
                 case "error": {
                     const errorMessage = run.error.slice(0, 300);
-                    let backtickCount = 1;
-                    while (true) {
-                        if (!errorMessage.includes("`".repeat(backtickCount))) {
-                            break;
-                        }
-                        backtickCount++;
+                    let backticks = "`";
+                    while (errorMessage.includes(backticks)) {
+                        backticks += "`";
                     }
-                    const backticks = "`".repeat(backtickCount);
                     replacement = `❌ Error: ${backticks}${errorMessage}${backticks}`;
                     break;
                 }
