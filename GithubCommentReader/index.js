@@ -666,9 +666,15 @@ ${
                 case "resolved":
                     replacement = `[✅ Started](${run.url})`;
                     break;
-                case "error":
-                    replacement = `❌ Error: ${run.error}`;
+                case "error": {
+                    const errorMessage = run.error.slice(0, 300);
+                    let backticks = "`";
+                    while (errorMessage.includes(backticks)) {
+                        backticks += "`";
+                    }
+                    replacement = `❌ Error: ${backticks}${errorMessage}${backticks}`;
                     break;
+                }
             }
 
             if (replacement) {
