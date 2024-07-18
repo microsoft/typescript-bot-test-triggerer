@@ -50,6 +50,7 @@ async function sleep(ms) {
 
 /**
  * @typedef {import("@octokit/webhooks-types").AuthorAssociation} AuthorAssociation
+ * @typedef {Awaited<ReturnType<import("octokit").Octokit["rest"]["pulls"]["get"]>>["data"] | undefined} PR
  * @typedef {{ kind: "unresolvedGitHub"; distinctId: string }} UnresolvedGitHubRun
  * @typedef {{ kind: "resolved"; distinctId: string; url: string }} ResolvedRun
  * @typedef {{ kind: "error"; distinctId: string; error: string }} ErrorRun
@@ -60,7 +61,7 @@ async function sleep(ms) {
  *     match: RegExpMatchArray;
  *     distinctId: string;
  *     issueNumber: number; // TODO(jakebailey): rename this
- *     isPr: boolean;
+ *     pr: PR | undefined;
  *     requestingUser: string;
  *     statusCommentId: number; // TODO(jakebailey): rename this
  * }} RequestInfo
@@ -272,62 +273,62 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         })
     }))
     .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
-        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        assert(request.pr);
         return queueBuild({
             definitionId: 47,
             sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
-                old_ts_repo_url: pr.base.repo.clone_url,
-                old_head_ref: pr.base.ref
+                old_ts_repo_url: request.pr.base.repo.clone_url,
+                old_head_ref: request.pr.base.ref
             }
         })
     }))
     .set(/user test tsserver/, createCommand(async (request) => {
-        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        assert(request.pr);
         return queueBuild({
             definitionId: 47,
             sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
-                old_ts_repo_url: pr.base.repo.clone_url,
-                old_head_ref: pr.base.ref,
+                old_ts_repo_url: request.pr.base.repo.clone_url,
+                old_head_ref: request.pr.base.ref,
                 entrypoint: "tsserver",
-                prng_seed: `${pr.id}`,
+                prng_seed: `${request.pr.id}`,
             }
         })
     }))
     .set(/test top(\d{1,3})/, createCommand(async (request) => {
-        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        assert(request.pr);
         return queueBuild({
             definitionId: 47,
             sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
-                old_ts_repo_url: pr.base.repo.clone_url,
-                old_head_ref: pr.base.ref,
+                old_ts_repo_url: request.pr.base.repo.clone_url,
+                old_head_ref: request.pr.base.ref,
                 top_repos: "true",
                 repo_count: `${Math.max(+request.match[1], 400)}`,
             }
         })
     }))
     .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
-        const pr = (await getGHClient().pulls.get({ pull_number: request.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        assert(request.pr);
         return queueBuild({
             definitionId: 47,
             sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
-                old_ts_repo_url: pr.base.repo.clone_url,
-                old_head_ref: pr.base.ref,
+                old_ts_repo_url: request.pr.base.repo.clone_url,
+                old_head_ref: request.pr.base.ref,
                 top_repos: "true",
                 repo_count: `${Math.max(+request.match[1], 200)}`,
                 entrypoint: "tsserver",
-                prng_seed: `${pr.id}`,
+                prng_seed: `${request.pr.id}`,
             }
         })
     }))
@@ -576,6 +577,23 @@ async function webhook(params) {
         log(`Failed to react to comment: ${e}`);
     }
 
+    /** @type {PR | undefined} */
+    let pr;
+
+    if (params.isPr) {
+        pr = (await cli.pulls.get({ pull_number: params.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+
+        if (!pr.merged && !pr.mergeable) {
+            await cli.issues.createComment({
+                owner: "microsoft",
+                repo: "TypeScript",
+                issue_number: params.issueNumber,
+                body: `This PR is not mergeable. Please resolve conflicts before running tests.`,
+            });
+            return;
+        }
+    }
+    
     const start = Date.now();
     const created = `>=${new Date(start).toISOString()}`;
 
@@ -614,7 +632,7 @@ ${
                 issueNumber: params.issueNumber,
                 statusCommentId: statusCommentId,
                 requestingUser: params.commentUser,
-                isPr: params.isPr,
+                pr,
                 log: log,
             });
         } catch (e) {
