@@ -667,7 +667,7 @@ ${
                     replacement = `[✅ Started](${run.url})`;
                     break;
                 case "error": {
-                    const errorMessage = run.error.slice(0, 300);
+                    const errorMessage = run.error.slice(0, 300).replace(/\r?\n/g, " ");
                     let backticks = "`";
                     while (errorMessage.includes(backticks)) {
                         backticks += "`";
