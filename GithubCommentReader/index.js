@@ -588,7 +588,7 @@ async function webhook(params) {
                 owner: "microsoft",
                 repo: "TypeScript",
                 issue_number: params.issueNumber,
-                body: `This PR is not mergeable. Please resolve conflicts before running tests.`,
+                body: `Hey @${params.commentUser}, this PR is in an unmergable state, so is missing a merge commit to run against; please resolve conflicts and try again.`,
             });
             return;
         }
