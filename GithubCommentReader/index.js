@@ -487,6 +487,20 @@ function getResultPlaceholder(distinctId) {
     return `<!--result-${distinctId}-->`;
 }
 
+/**
+ * @param {string} s
+ */
+function asMarkdownInlineCode(s) {
+    let backticks = "`";
+    let space = "";
+    while (s.includes(backticks)) {
+        backticks += "`";
+        space = " "
+    }
+    return `${backticks}${space}${s}${space}${backticks}`;
+}
+
+
 const testItCommands = [`${botCall} test it`, `${botCall} test this`];
 const testItCommandToRun = [
     `${botCall} test top400`,
@@ -668,11 +682,7 @@ ${
                     break;
                 case "error": {
                     const errorMessage = run.error.replace(/\r?\n/g, " ").slice(0, 300);
-                    let backticks = "`";
-                    while (errorMessage.includes(backticks)) {
-                        backticks += "`";
-                    }
-                    replacement = `❌ Error: ${backticks}${errorMessage}${backticks}`;
+                    replacement = `❌ Error: ${asMarkdownInlineCode(errorMessage)}`;
                     break;
                 }
             }
