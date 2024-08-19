@@ -500,7 +500,6 @@ function asMarkdownInlineCode(s) {
     return `${backticks}${space}${s}${space}${backticks}`;
 }
 
-
 const testItCommands = [`${botCall} test it`, `${botCall} test this`];
 const testItCommandToRun = [
     `${botCall} test top400`,
