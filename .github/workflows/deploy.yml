@@ -45,7 +45,7 @@ jobs:
     runs-on:
       - "self-hosted"
       - "1ES.Pool=TypeScript-1ES-GitHub"
-      - "1ES.ImageOverride=ubuntu-22.04"
+      - "1ES.ImageOverride=mariner-2.0"
 
     needs: build
     environment:
