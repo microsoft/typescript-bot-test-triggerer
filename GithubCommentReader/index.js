@@ -794,6 +794,9 @@ async function handler(request, context) {
         });
     } catch (e) {
         context.log(`Error processing comment: ${e}`);
+        if (e instanceof Error) {
+            context.log(e.stack);
+        }
         return {
             status: 500,
         };
