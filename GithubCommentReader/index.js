@@ -780,17 +780,24 @@ async function handler(request, context) {
 
     context.log(`Processing comment ${comment.id} on ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`)
 
-    await webhook({
-        // The azure functions logger is a getter and crashes if passed directly
-        log: (s) => context.log(s),
-        issueNumber,
-        commentId: comment.id,
-        commentBody: comment.body,
-        commentIsFromIssue,
-        isPr,
-        commentUser: comment.user.login,
-        authorAssociation: comment.author_association,
-    });
+    try {
+        await webhook({
+            // The azure functions logger is a getter and crashes if passed directly
+            log: (s) => context.log(s),
+            issueNumber,
+            commentId: comment.id,
+            commentBody: comment.body,
+            commentIsFromIssue,
+            isPr,
+            commentUser: comment.user.login,
+            authorAssociation: comment.author_association,
+        });
+    } catch (e) {
+        context.log(`Error processing comment: ${e}`);
+        return {
+            status: 500,
+        };
+    }
 
     return {};
 }
