@@ -524,14 +524,6 @@ async function webhook(params) {
     const log = params.log;
     const cli = getGHClient();
 
-    try {
-        const u = await cli.users.getAuthenticated();
-        log(`Authenticated as ${u.data.login}`);
-        log(`Scopes: ${u.headers["x-oauth-scopes"]}`);
-    } catch (e) {
-        log(`Failed to get token user info: ${e}`);
-    }
-
     let lines = params.commentBody.split("\n").map((line) => line.trim());
     let hasTestIt = false;
     lines = lines.filter((line) => {
