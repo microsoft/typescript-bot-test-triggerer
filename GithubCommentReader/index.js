@@ -469,6 +469,29 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             }
         })
     }, undefined, false))
+    .set(/(auto)?fix this/, createCommand(async (request) => {
+        assert(request.pr);
+        assert(request.pr.head);
+        if (request.pr.head.repo?.fork || request.pr.head.repo?.full_name != "microsoft/TypeScript") {
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `Can't invoke autofix workflow automatically on forks.`
+            }
+        }
+        const cli = getGHClient();
+        await cli.actions.createWorkflowDispatch({
+            owner: "microsoft",
+            repo: "TypeScript",
+            ref: request.pr.head.ref,
+            workflow_id: "accept-baselines-fix-lints.yaml",
+        });
+
+        return {
+            kind: "unresolvedGitHub",
+            distinctId: request.distinctId
+        }
+    }))
 
 const botCall = "@typescript-bot";
 
