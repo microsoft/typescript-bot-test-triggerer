@@ -18,7 +18,7 @@
     "@azure/identity": "^4.2.1",
     "@octokit/webhooks-methods": "^4.1.0",
     "azure-devops-node-api": "^13.0.0",
-    "octokit": "^3.2.1"
+    "octokit": "^4.1.2"
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.5.1",
