@@ -28,7 +28,7 @@ runs:
   using: composite
   steps:
     - name: Post workflow result
-      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
       env:
         SUCCESS_COMMENT: ${{ inputs.success_comment }}
         FAILURE_COMMENT: ${{ inputs.failure_comment }}
