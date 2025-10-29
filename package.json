@@ -14,8 +14,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@azure/functions": "^4.7.2-preview",
-    "@azure/identity": "^4.11.1",
+    "@azure/functions": "^4.8.0",
+    "@azure/identity": "^4.13.0",
     "@octokit/webhooks-methods": "^4.1.0",
     "azure-devops-node-api": "^15.1.1",
     "octokit": "^3.2.1"
@@ -24,6 +24,6 @@
     "@octokit/webhooks-types": "^7.5.1",
     "@tsconfig/node20": "^20.1.6",
     "@types/node": "^20.19.10",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.3"
   }
 }
