@@ -1,7 +1,7 @@
 import { app } from "@azure/functions";
 import { verify as verifyWebhook } from "@octokit/webhooks-methods";
 import { Octokit } from "octokit";
-import * as vsts from "azure-devops-node-api";
+import vsts from "azure-devops-node-api";
 import assert from "assert";
 import { ManagedIdentityCredential } from "@azure/identity";
 
