@@ -1,9 +1,9 @@
-const { app } = require("@azure/functions");
-const { verify: verifyWebhook } = require("@octokit/webhooks-methods");
-const { Octokit } = require("octokit");
-const vsts = require("azure-devops-node-api");
-const assert = require("assert");
-const { ManagedIdentityCredential } = require("@azure/identity");
+import { app } from "@azure/functions";
+import { verify as verifyWebhook } from "@octokit/webhooks-methods";
+import { Octokit } from "octokit";
+import vsts from "azure-devops-node-api";
+import assert from "assert";
+import { ManagedIdentityCredential } from "@azure/identity";
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
 /** @type {{GH?: Octokit["rest"], vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
