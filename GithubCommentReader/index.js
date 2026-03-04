@@ -68,7 +68,7 @@ async function sleep(ms) {
  *     repo: string;
  * }} RequestInfo
  * @typedef {(request: RequestInfo) => Promise<Run>} CommandFn
- * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean }} Command
+ * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean, tsgoAllowed: boolean }} Command
  */
 void 0;
 
@@ -76,10 +76,11 @@ void 0;
  * @param {CommandFn} fn
  * @param {AuthorAssociation[]} authorAssociations
  * @param {boolean} prOnly
+ * @param {boolean} tsgoAllowed
  * @returns {Command}
  */
-function createCommand(fn, authorAssociations = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true) {
-    return { fn, authorAssociations, prOnly };
+function createCommand(fn, authorAssociations = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true, tsgoAllowed = false) {
+    return { fn, authorAssociations, prOnly, tsgoAllowed };
 }
 
 /**
@@ -251,7 +252,11 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             info: request,
             inputs: {}
         })
-    }))
+    },
+        ["MEMBER", "OWNER", "COLLABORATOR"],
+        /* prOnly */ true,
+        /* tsgoAllowed */ true,
+    ))
     .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createCommand((request) => {
         return createPipelineRun({
             definitionId: 69,
@@ -265,17 +270,25 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 tsperf_preset: request.match[1] || "regular",
             }
         })
-    }))
+    },
+        ["MEMBER", "OWNER", "COLLABORATOR"],
+        /* prOnly */ true,
+        /* tsgoAllowed */ true,
+    ))
     .set(/run dt/, createCommand(async (request) => {
         return queueBuild({
             definitionId: 23,
             sourceBranch: `refs/pull/${request.issueNumber}/merge`,
             info: request,
             inputs: {
-                DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
+                DT_SHA: (await getGHClient().repos.getBranch({ owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master" })).data.commit.sha
             }
         })
-    }))
+    },
+        ["MEMBER", "OWNER", "COLLABORATOR"],
+        /* prOnly */ true,
+        /* tsgoAllowed */ true,
+    ))
     .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
         assert(request.pr);
         return queueBuild({
@@ -318,7 +331,11 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 repo_count: `${Math.max(+request.match[1], 400)}`,
             }
         })
-    }))
+    },
+        ["MEMBER", "OWNER", "COLLABORATOR"],
+        /* prOnly */ true,
+        /* tsgoAllowed */ true,
+    ))
     .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
         assert(request.pr);
         return queueBuild({
@@ -566,8 +583,9 @@ async function webhook(params) {
     }
     lines = [...new Set(lines)];
 
+    const tsgo = params.repo.includes("typescript-go")
     const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
-        if (!params.isPr && command.prOnly) {
+        if (!params.isPr && command.prOnly && tsgo && !command.tsgoAllowed) {
             return false;
         }
         return command.authorAssociations.includes(params.authorAssociation);
@@ -634,7 +652,7 @@ async function webhook(params) {
             return;
         }
     }
-    
+
     const start = Date.now();
     const created = `>=${new Date(start).toISOString()}`;
 
@@ -645,12 +663,11 @@ Starting jobs; this comment will be updated as builds start and complete.
 
 | Command | Status | Results |
 | ------- | ------ | ------- |
-${
-        commandInfos.map(({ name, distinctId }) =>
-            `| \`${name}\` | ${getStatusPlaceholder(distinctId)} | ${getResultPlaceholder(distinctId)} |`
-        )
+${commandInfos.map(({ name, distinctId }) =>
+        `| \`${name}\` | ${getStatusPlaceholder(distinctId)} | ${getResultPlaceholder(distinctId)} |`
+    )
             .join("\n")
-    }
+        }
 `.trim();
 
     log("Creating status comment");
