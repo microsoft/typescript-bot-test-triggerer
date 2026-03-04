@@ -252,11 +252,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             info: request,
             inputs: {}
         })
-    },
-        /* authorAssociations */ undefined,
-        /* prOnly */ undefined,
-        /* tsgoAllowed */ true,
-    ))
+    }))
     .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createCommand((request) => {
         return createPipelineRun({
             definitionId: 69,
@@ -270,11 +266,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 tsperf_preset: request.match[1] || "regular",
             }
         })
-    },
-        /* authorAssociations */ undefined,
-        /* prOnly */ undefined,
-        /* tsgoAllowed */ true,
-    ))
+    }))
     .set(/run dt/, createCommand(async (request) => {
         return queueBuild({
             definitionId: 23,
@@ -284,11 +276,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 DT_SHA: (await getGHClient().repos.getBranch({ owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master" })).data.commit.sha
             }
         })
-    },
-        /* authorAssociations */ undefined,
-        /* prOnly */ undefined,
-        /* tsgoAllowed */ true,
-    ))
+    }))
     .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
         assert(request.pr);
         return queueBuild({
@@ -628,7 +616,7 @@ async function webhook(params) {
         const createReaction = params.commentIsFromIssue ? cli.reactions.createForIssueComment : cli.reactions.createForPullRequestReviewComment;
         await createReaction({
             owner: "microsoft",
-            repo: "TypeScript",
+            repo: params.repo,
             comment_id: params.commentId,
             content: "+1",
         });
