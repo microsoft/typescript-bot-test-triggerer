@@ -801,7 +801,6 @@ async function handler(request, context) {
         return {};
     }
 
-    assert("repository" in event);
     const repoName = event.repository.name;
     const commentIsFromIssue = "comment" in event;
     const comment = commentIsFromIssue ? event.comment : event.review;
