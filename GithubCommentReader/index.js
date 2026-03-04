@@ -64,9 +64,11 @@ async function sleep(ms) {
  *     pr: PR | undefined;
  *     requestingUser: string;
  *     statusCommentId: number; // TODO(jakebailey): rename this
+ *     owner: string;
+ *     repo: string;
  * }} RequestInfo
  * @typedef {(request: RequestInfo) => Promise<Run>} CommandFn
- * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean }} Command
+ * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean, tsgoAllowed: boolean }} Command
  */
 void 0;
 
@@ -74,10 +76,11 @@ void 0;
  * @param {CommandFn} fn
  * @param {AuthorAssociation[]} authorAssociations
  * @param {boolean} prOnly
+ * @param {boolean} tsgoAllowed
  * @returns {Command}
  */
-function createCommand(fn, authorAssociations = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true) {
-    return { fn, authorAssociations, prOnly };
+function createCommand(fn, authorAssociations = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true, tsgoAllowed = false) {
+    return { fn, authorAssociations, prOnly, tsgoAllowed };
 }
 
 /**
@@ -107,6 +110,8 @@ function createParameters(info, inputs) {
         source_issue: `${info.issueNumber}`,
         requesting_user: info.requestingUser,
         status_comment: `${info.statusCommentId}`,
+        source_owner: info.owner,
+        source_repo: info.repo,
     };
 
     const requiredParameters = Object.keys(parameters);
@@ -226,7 +231,7 @@ async function createWorkflowDispatch({ workflowId, info, inputs }) {
     const cli = getGHClient();
     await cli.actions.createWorkflowDispatch({
         owner: "microsoft",
-        repo: "TypeScript",
+        repo: info.repo,
         ref: "main",
         workflow_id: workflowId,
         inputs: parameters,
@@ -268,7 +273,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             sourceBranch: `refs/pull/${request.issueNumber}/merge`,
             info: request,
             inputs: {
-                DT_SHA: (await getGHClient().repos.getBranch({owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master"})).data.commit.sha
+                DT_SHA: (await getGHClient().repos.getBranch({ owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master" })).data.commit.sha
             }
         })
     }))
@@ -314,7 +319,11 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 repo_count: `${Math.max(+request.match[1], 400)}`,
             }
         })
-    }))
+    },
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
+        /* tsgoAllowed */ true,
+    ))
     .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
         assert(request.pr);
         return queueBuild({
@@ -540,7 +549,8 @@ const testItCommandToRun = [
  *     commentIsFromIssue: boolean;
  *     isPr: boolean;
  *     commentUser: string;
- *     authorAssociation: AuthorAssociation
+ *     authorAssociation: AuthorAssociation;
+ *     repo: string;
  * }} WebhookParams 
  * @param {WebhookParams} params */
 async function webhook(params) {
@@ -561,8 +571,9 @@ async function webhook(params) {
     }
     lines = [...new Set(lines)];
 
+    const tsgo = params.repo.includes("typescript-go")
     const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
-        if (!params.isPr && command.prOnly) {
+        if (!params.isPr && command.prOnly && tsgo && !command.tsgoAllowed) {
             return false;
         }
         return command.authorAssociations.includes(params.authorAssociation);
@@ -605,7 +616,7 @@ async function webhook(params) {
         const createReaction = params.commentIsFromIssue ? cli.reactions.createForIssueComment : cli.reactions.createForPullRequestReviewComment;
         await createReaction({
             owner: "microsoft",
-            repo: "TypeScript",
+            repo: params.repo,
             comment_id: params.commentId,
             content: "+1",
         });
@@ -617,19 +628,19 @@ async function webhook(params) {
     let pr;
 
     if (params.isPr) {
-        pr = (await cli.pulls.get({ pull_number: params.issueNumber, owner: "microsoft", repo: "TypeScript" })).data;
+        pr = (await cli.pulls.get({ pull_number: params.issueNumber, owner: "microsoft", repo: params.repo })).data;
 
         if (!pr.merged && !pr.mergeable) {
             await cli.issues.createComment({
                 owner: "microsoft",
-                repo: "TypeScript",
+                repo: params.repo,
                 issue_number: params.issueNumber,
                 body: `Hey @${params.commentUser}, this PR is in an unmergable state, so is missing a merge commit to run against; please resolve conflicts and try again.`,
             });
             return;
         }
     }
-    
+
     const start = Date.now();
     const created = `>=${new Date(start).toISOString()}`;
 
@@ -640,18 +651,17 @@ Starting jobs; this comment will be updated as builds start and complete.
 
 | Command | Status | Results |
 | ------- | ------ | ------- |
-${
-        commandInfos.map(({ name, distinctId }) =>
-            `| \`${name}\` | ${getStatusPlaceholder(distinctId)} | ${getResultPlaceholder(distinctId)} |`
-        )
+${commandInfos.map(({ name, distinctId }) =>
+        `| \`${name}\` | ${getStatusPlaceholder(distinctId)} | ${getResultPlaceholder(distinctId)} |`
+    )
             .join("\n")
-    }
+        }
 `.trim();
 
     log("Creating status comment");
     const statusComment = await cli.issues.createComment({
         owner: "microsoft",
-        repo: "TypeScript",
+        repo: params.repo,
         issue_number: params.issueNumber,
         body: statusCommentBody,
     });
@@ -670,6 +680,8 @@ ${
                 requestingUser: params.commentUser,
                 pr,
                 log: log,
+                owner: "microsoft",
+                repo: params.repo,
             });
         } catch (e) {
             // TODO: short error message
@@ -683,7 +695,7 @@ ${
     async function updateComment() {
         const comment = await cli.issues.getComment({
             owner: "microsoft",
-            repo: "TypeScript",
+            repo: params.repo,
             comment_id: statusCommentId,
         });
 
@@ -720,7 +732,7 @@ ${
 
         await cli.issues.updateComment({
             owner: "microsoft",
-            repo: "TypeScript",
+            repo: params.repo,
             comment_id: statusCommentId,
             body,
         });
@@ -740,7 +752,7 @@ ${
 
         const response = await cli.actions.listWorkflowRunsForRepo({
             owner: "microsoft",
-            repo: "TypeScript",
+            repo: params.repo,
             created,
             exclude_pull_requests: true,
         });
@@ -789,6 +801,7 @@ async function handler(request, context) {
         return {};
     }
 
+    const repoName = event.repository.name;
     const commentIsFromIssue = "comment" in event;
     const comment = commentIsFromIssue ? event.comment : event.review;
     if (!comment.body) {
@@ -800,8 +813,7 @@ async function handler(request, context) {
         || !!("issue" in event && event.issue && event.issue.pull_request);
 
     const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
-
-    context.log(`Processing comment ${comment.id} on ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`)
+    context.log(`Processing comment ${comment.id} on microsoft/${repoName} ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`)
 
     try {
         await webhook({
@@ -814,6 +826,7 @@ async function handler(request, context) {
             isPr,
             commentUser: comment.user.login,
             authorAssociation: comment.author_association,
+            repo: repoName,
         });
     } catch (e) {
         context.log(`Error processing comment: ${e}`);
