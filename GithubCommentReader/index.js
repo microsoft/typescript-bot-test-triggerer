@@ -253,8 +253,8 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             inputs: {}
         })
     },
-        ["MEMBER", "OWNER", "COLLABORATOR"],
-        /* prOnly */ true,
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
     .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createCommand((request) => {
@@ -271,8 +271,8 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             }
         })
     },
-        ["MEMBER", "OWNER", "COLLABORATOR"],
-        /* prOnly */ true,
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
     .set(/run dt/, createCommand(async (request) => {
@@ -285,8 +285,8 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             }
         })
     },
-        ["MEMBER", "OWNER", "COLLABORATOR"],
-        /* prOnly */ true,
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
     .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
@@ -332,8 +332,8 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             }
         })
     },
-        ["MEMBER", "OWNER", "COLLABORATOR"],
-        /* prOnly */ true,
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
     .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
