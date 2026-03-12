@@ -66,6 +66,7 @@ async function sleep(ms) {
  *     statusCommentId: number; // TODO(jakebailey): rename this
  *     owner: string;
  *     repo: string;
+ *     tsgo: boolean;
  * }} RequestInfo
  * @typedef {(request: RequestInfo) => Promise<Run>} CommandFn
  * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean, tsgoAllowed: boolean }} Command
@@ -110,9 +111,12 @@ function createParameters(info, inputs) {
         source_issue: `${info.issueNumber}`,
         requesting_user: info.requestingUser,
         status_comment: `${info.statusCommentId}`,
-        source_owner: info.owner,
-        source_repo: info.repo,
     };
+
+    if (info.tsgo) {
+        parameters.source_owner = info.owner;
+        parameters.source_repo = info.repo;
+    }
 
     const requiredParameters = Object.keys(parameters);
     const confliciting = Object.keys(inputs).filter((key) => requiredParameters.includes(key));
@@ -682,6 +686,7 @@ ${commandInfos.map(({ name, distinctId }) =>
                 log: log,
                 owner: "microsoft",
                 repo: params.repo,
+                tsgo,
             });
         } catch (e) {
             // TODO: short error message
