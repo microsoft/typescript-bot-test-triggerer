@@ -282,10 +282,15 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         })
     }))
     .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
+        assert(request.issueNumber);
         assert(request.pr);
-        return queueBuild({
+        return createPipelineRun({
             definitionId: 47,
-            sourceBranch: "",
+            repositories: {
+                "typescript-go": {
+                    refName: `refs/pull/${request.issueNumber}/merge`,
+                }
+            },
             info: request,
             inputs: {
                 post_result: "true",
