@@ -344,7 +344,11 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 prng_seed: `${request.pr.id}`,
             }
         })
-    }))
+    },
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
+        /* tsgoAllowed */ true,
+    ))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
         const targetBranch = request.match[1];
 
