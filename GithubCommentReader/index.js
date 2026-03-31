@@ -156,6 +156,43 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
     info.log(`Trigger build ${definitionId} on ${info.issueNumber}`)
     const build = await (await getVSTSTypeScriptClient()).getBuildApi();
     const response = await build.queueBuild(buildParams, "TypeScript");
+
+    return {
+        kind: "resolved",
+        distinctId: info.distinctId,
+        url: response._links.web.href
+    };
+}
+
+/**
+ * Same as queue build but does a little more error handling.
+ * @param {QueueBuildRequest} arg
+ * @returns {Promise<ResolvedRun>}
+ */
+async function queueBuildWithLog({ definitionId, sourceBranch, info, inputs }) {
+    const parameters = createParameters(info, inputs);
+
+    /** @type {BuildVars} */
+    const buildParams = {
+        definition: { id: definitionId },
+        project: { id: typeScriptProjectId },
+        sourceBranch, // Undocumented, but used by the official frontend
+        sourceVersion: ``, // Also undocumented
+        parameters: JSON.stringify(parameters), // This API is real bad
+        templateParameters: parameters,
+    };
+
+    info.log(`Trigger build ${definitionId} on ${info.issueNumber}`)
+    const build = await (await getVSTSTypeScriptClient()).getBuildApi();
+    var response
+    try {
+        response = await build.queueBuild(buildParams, "TypeScript");
+    } catch (e) {
+        // TODO: short error message
+        throw new Error(`Failed To queue build: ${e} with info: ${JSON.stringify(info)}
+
+inputs ${JSON.stringify(inputs)}`);
+    }
     return {
         kind: "resolved",
         distinctId: info.distinctId,
@@ -312,6 +349,25 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
     .set(/test top(\d{1,3})/, createCommand(async (request) => {
         assert(request.pr);
         return queueBuild({
+            definitionId: 47,
+            sourceBranch: "",
+            info: request,
+            inputs: {
+                post_result: "true",
+                old_ts_repo_url: request.pr.base.repo.clone_url,
+                old_head_ref: request.pr.base.ref,
+                top_repos: "true",
+                repo_count: `${Math.max(+request.match[1], 400)}`,
+            }
+        })
+    },
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
+        /* tsgoAllowed */ true,
+    ))
+    .set(/debug top(\d{1,3})/, createCommand(async (request) => {
+        assert(request.pr);
+        return queueBuildWithLog({
             definitionId: 47,
             sourceBranch: "",
             info: request,
