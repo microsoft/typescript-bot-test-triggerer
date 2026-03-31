@@ -380,7 +380,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             }
         })
     },
-        /* authorAssociations */ undefined,
+        /* authorAssociations */ ["MEMBER"],
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
