@@ -113,11 +113,6 @@ function createParameters(info, inputs) {
         status_comment: `${info.statusCommentId}`,
     };
 
-    if (info.tsgo) {
-        parameters.source_owner = info.owner;
-        parameters.source_repo = info.repo;
-    }
-
     const requiredParameters = Object.keys(parameters);
     const confliciting = Object.keys(inputs).filter((key) => requiredParameters.includes(key));
     assert(confliciting.length === 0, `Inputs conflict with required parameters: ${confliciting.join(", ")}`);
