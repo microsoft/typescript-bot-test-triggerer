@@ -255,7 +255,11 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
     .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createCommand((request) => {
         return createPipelineRun({
             definitionId: 69,
-            repositories: {
+            repositories: request.tsgo ? {
+                "typescript-go": {
+                    refName: `refs/pull/${request.issueNumber}/merge`,
+                }
+            } : {
                 TypeScript: {
                     refName: `refs/pull/${request.issueNumber}/merge`,
                 }
@@ -263,9 +267,14 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             info: request,
             inputs: {
                 tsperf_preset: request.match[1] || "regular",
+                ts_go: request.tsgo ? "true" : "false",
             }
         })
-    }))
+    },
+        /* authorAssociations */ undefined,
+        /* prOnly */ undefined,
+        /* tsgoAllowed */ true,
+    ))
     .set(/run dt/, createCommand(async (request) => {
         return queueBuild({
             definitionId: 23,
