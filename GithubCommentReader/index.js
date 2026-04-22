@@ -585,7 +585,10 @@ async function webhook(params) {
 
     const tsgo = params.repo.includes("typescript-go")
     const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
-        if (!params.isPr && command.prOnly && tsgo && !command.tsgoAllowed) {
+        if (!params.isPr && command.prOnly) {
+            return false;
+        }
+        if (tsgo && !command.tsgoAllowed) {
             return false;
         }
         return command.authorAssociations.includes(params.authorAssociation);
