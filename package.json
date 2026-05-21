@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@azure/functions": "^4.11.2",
-    "@azure/identity": "^4.13.0",
+    "@azure/identity": "^4.13.1",
     "@octokit/webhooks-methods": "^6.0.0",
     "azure-devops-node-api": "^15.1.2",
     "octokit": "^5.0.5"
