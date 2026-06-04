@@ -4,28 +4,94 @@ import { Octokit } from "octokit";
 import vsts from "azure-devops-node-api";
 import assert from "assert";
 import { ManagedIdentityCredential } from "@azure/identity";
+import { CryptographyClient } from "@azure/keyvault-keys";
+import { createGitHubAppAuth } from "./github-app-auth.js";
 
-// We cache the clients below this way if a single comment executes two commands, we only bother creating the client once
-/** @type {{GH?: Octokit["rest"], vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
+const refreshWindowMs = 1000 * 60 * 5;
+
+// We cache the clients below this way if a single comment executes two commands, we only bother creating the client once.
+/** @type {{GH?: { token: string; api: Octokit["rest"] }, GHAppAuth?: ReturnType<typeof createGitHubAppAuth>, definitelyTypedGH?: { token: string; api: Octokit["rest"] }, vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
 let clients = {};
 
-function getGHClient() {
-    if (clients.GH) {
-        return clients.GH;
+const githubAppRepositories = ["TypeScript", "typescript-go"];
+
+function getGitHubAppAuth() {
+    const appClientId = process.env.GITHUB_APP_CLIENT_ID || process.env.GITHUB_APP_ID;
+    assert(appClientId, "GITHUB_APP_CLIENT_ID or GITHUB_APP_ID must be set");
+    const keyId = process.env.GITHUB_APP_KEY_VAULT_KEY_ID;
+    assert(keyId, "GITHUB_APP_KEY_VAULT_KEY_ID must be set when using Key Vault GitHub App auth");
+    if (!clients.GHAppAuth) {
+        const cryptographyClient = new CryptographyClient(keyId, new ManagedIdentityCredential());
+        /**
+         * @param {string} signingInput
+         */
+        const signer = async (signingInput) => {
+            const signature = await cryptographyClient.signData("RS256", Buffer.from(signingInput));
+            return Buffer.from(signature.result).toString("base64url");
+        };
+        clients.GHAppAuth = createGitHubAppAuth({
+            appClientId,
+            signer,
+            defaultOwner: "microsoft",
+        });
     }
-    else {
-        const token = process.env.GITHUB_TOKEN;
-        assert(token, "GITHUB_TOKEN must be set");
-        clients.GH = new Octokit({ auth: token }).rest;
-        return clients.GH;
+    return clients.GHAppAuth;
+}
+
+/** @returns {Record<string, "read" | "write" | "admin">} */
+function getTokenPermissions() {
+    return {
+        actions: "write",
+        contents: "read",
+        issues: "write",
+        pull_requests: "write",
+    };
+}
+
+async function getGHClient() {
+    const permissions = getTokenPermissions();
+
+    const token = await getGitHubAppAuth().getToken({
+        repositories: githubAppRepositories,
+        permissions,
+    });
+
+    const cachedGH = clients.GH;
+    if (cachedGH && cachedGH.token === token) {
+        return cachedGH.api;
     }
+
+    const api = new Octokit({ auth: token }).rest;
+    clients.GH = { token, api };
+    return api;
+}
+
+async function getDefinitelyTypedGHClient() {
+    const token = await getGitHubAppAuth().getToken({
+        owner: "DefinitelyTyped",
+        repositories: ["DefinitelyTyped"],
+        permissions: { contents: "read" },
+    });
+
+    if (clients.definitelyTypedGH?.token === token) {
+        return clients.definitelyTypedGH.api;
+    }
+
+    const api = new Octokit({ auth: token }).rest;
+    clients.definitelyTypedGH = { token, api };
+    return api;
+}
+
+async function getDefinitelyTypedMasterSha() {
+    const api = await getDefinitelyTypedGHClient();
+    return (await api.repos.getBranch({ owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master" })).data.commit.sha;
 }
 
 const typeScriptProjectId = "cf7ac146-d525-443c-b23c-0d58337efebc";
 
 async function getVSTSTypeScriptClient() {
     if (clients.vstsTypescript) {
-        if (Date.now() < (clients.vstsTypescript.expiresAt - 1000 * 60 * 5)) {
+        if (Date.now() < (clients.vstsTypescript.expiresAt - refreshWindowMs)) {
             return clients.vstsTypescript.api;
         }
     }
@@ -55,7 +121,7 @@ async function sleep(ms) {
  * @typedef {{ kind: "resolved"; distinctId: string; url: string }} ResolvedRun
  * @typedef {{ kind: "error"; distinctId: string; error: string }} ErrorRun
  * @typedef {UnresolvedGitHubRun | ResolvedRun | ErrorRun} Run
- * 
+ *
  * @typedef {{
  *     log: (s: string) => void;
  *     match: RegExpMatchArray;
@@ -124,14 +190,14 @@ function createParameters(info, inputs) {
 
 /**
  * This queues a build using the legacy AzDO build API.
- * 
+ *
  * @typedef {{
  *    definitionId: number;
  *    sourceBranch: string;
  *    info: RequestInfo;
  *    inputs: Record<string, string>;
  * }} QueueBuildRequest
- * 
+ *
  * @param {QueueBuildRequest} arg
  * @returns {Promise<ResolvedRun>}
  */
@@ -174,14 +240,14 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
 
 /**
  * This queues a build using the AzDO Pipelines API.
- * 
+ *
  * @typedef {{
 *    definitionId: number;
 *    repositories: Record<string, { refName?: string; version?: string }>
 *    info: RequestInfo;
 *    inputs: Record<string, string>;
 * }} CreatePipelineRunRequest
-* 
+*
 * @param {CreatePipelineRunRequest} arg
 * @returns {Promise<ResolvedRun>}
 */
@@ -214,20 +280,20 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }) {
 
 /**
  * This queues a build using the AzDO Pipelines API.
- * 
+ *
  * @typedef {{
 *    workflowId: string;
 *    info: RequestInfo;
 *    inputs: Record<string, string>;
 * }} CreateWorkflowDispatchRequest
-* 
+*
 * @param {CreateWorkflowDispatchRequest} arg
 * @returns {Promise<UnresolvedGitHubRun>}
 */
 async function createWorkflowDispatch({ workflowId, info, inputs }) {
     const parameters = createParameters(info, inputs);
 
-    const cli = getGHClient();
+    const cli = await getGHClient();
     await cli.actions.createWorkflowDispatch({
         owner: "microsoft",
         repo: info.repo,
@@ -281,7 +347,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
             sourceBranch: `refs/pull/${request.issueNumber}/merge`,
             info: request,
             inputs: {
-                DT_SHA: (await getGHClient().repos.getBranch({ owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master" })).data.commit.sha
+                DT_SHA: await getDefinitelyTypedMasterSha()
             }
         })
     }))
@@ -356,7 +422,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
         const targetBranch = request.match[1];
 
-        const cli = getGHClient();
+        const cli = await getGHClient();
         try {
             await cli.git.getRef({
                 owner: "Microsoft",
@@ -385,7 +451,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         const targetBranch = `release-${request.match[1]}`;
         let targetBranchExists = false;
         try {
-            await getGHClient().git.getRef({
+            await (await getGHClient()).git.getRef({
                 owner: "Microsoft",
                 repo: "TypeScript",
                 ref: `heads/${targetBranch}`
@@ -413,7 +479,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         })
     }, undefined, false))
     .set(/bump release-([\d\.]+)/, createCommand(async (request) => {
-        const cli = getGHClient();
+        const cli = await getGHClient();
         const targetBranch = `release-${request.match[1]}`;
         try {
             await cli.git.getRef({
@@ -500,7 +566,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 error: `Can't invoke autofix workflow automatically on forks.`
             }
         }
-        const cli = getGHClient();
+        const cli = await getGHClient();
         await cli.actions.createWorkflowDispatch({
             owner: "microsoft",
             repo: "TypeScript",
@@ -514,7 +580,20 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         }
     }))
 
-const botCall = "@typescript-bot";
+const botCalls = ["@typescript-bot", "@typescript-automation"];
+
+/**
+ * @param {string} line
+ * @returns {string | undefined} The remainder of the line after the bot call, or undefined if not a bot call.
+ */
+function matchBotCall(line) {
+    for (const call of botCalls) {
+        if (line.startsWith(call)) {
+            return line.slice(call.length).trim();
+        }
+    }
+    return undefined;
+}
 
 /**
  * @param {string} distinctId
@@ -544,12 +623,12 @@ function asMarkdownInlineCode(s) {
     return `${backticks}${space}${s}${space}${backticks}`;
 }
 
-const testItCommands = [`${botCall} test it`, `${botCall} test this`];
-const testItCommandToRun = [
-    `${botCall} test top400`,
-    `${botCall} user test this`,
-    `${botCall} run dt`,
-    `${botCall} perf test this faster`,
+const testItSuffixes = ["test it", "test this"];
+const testItCommandSuffixes = [
+    "test top400",
+    "user test this",
+    "run dt",
+    "perf test this faster",
 ];
 
 /**
@@ -563,23 +642,24 @@ const testItCommandToRun = [
  *     commentUser: string;
  *     authorAssociation: AuthorAssociation;
  *     repo: string;
- * }} WebhookParams 
+ * }} WebhookParams
  * @param {WebhookParams} params */
 async function webhook(params) {
     const log = params.log;
-    const cli = getGHClient();
+    const cli = await getGHClient();
 
     let lines = params.commentBody.split("\n").map((line) => line.trim());
     let hasTestIt = false;
     lines = lines.filter((line) => {
-        if (testItCommands.includes(line)) {
+        const rest = matchBotCall(line);
+        if (rest !== undefined && testItSuffixes.includes(rest)) {
             hasTestIt = true;
             return false;
         }
         return true;
     })
     if (hasTestIt) {
-        lines = [...lines, ...testItCommandToRun];
+        lines = [...lines, ...testItCommandSuffixes];
     }
     lines = [...new Set(lines)];
 
@@ -602,22 +682,22 @@ async function webhook(params) {
     /** @type {{ name: string; match: RegExpExecArray; fn: CommandFn; }[]} */
     let commandsToRun = [];
 
-    for (let line of lines) {
-        if (!line.startsWith(botCall)) {
+    for (const line of lines) {
+        let rest = matchBotCall(line);
+        if (rest === undefined) {
             continue;
         }
-        line = line.slice(botCall.length).trim();
 
-        if (line.startsWith(":")) {
-            line = line.slice(1).trim();
+        if (rest.startsWith(":")) {
+            rest = rest.slice(1).trim();
         }
 
         for (const [key, command] of applicableCommands) {
-            const match = key.exec(line);
+            const match = key.exec(rest);
             if (!match) {
                 continue;
             }
-            commandsToRun.push({ name: line, match, fn: command.fn });
+            commandsToRun.push({ name: rest, match, fn: command.fn });
         }
     }
 

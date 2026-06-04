@@ -24,3 +24,4 @@ appsettings.json
 local.settings.json
 *.PublishSettings
 function.zip
+GithubCommentReader/github-app-auth.js
