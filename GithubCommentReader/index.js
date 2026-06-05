@@ -10,10 +10,8 @@ import { createGitHubAppAuth } from "./github-app-auth.js";
 const refreshWindowMs = 1000 * 60 * 5;
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once.
-/** @type {{GH?: { token: string; api: Octokit["rest"] }, GHAppAuth?: ReturnType<typeof createGitHubAppAuth>, definitelyTypedGH?: { token: string; api: Octokit["rest"] }, vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
+/** @type {{GH?: { token: string; repo: string; api: Octokit["rest"] }, GHAppAuth?: ReturnType<typeof createGitHubAppAuth>, definitelyTypedGH?: { token: string; api: Octokit["rest"] }, vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
 let clients = {};
-
-const githubAppRepositories = ["TypeScript", "typescript-go"];
 
 function getGitHubAppAuth() {
     const appClientId = process.env.GITHUB_APP_CLIENT_ID || process.env.GITHUB_APP_ID;
@@ -48,21 +46,24 @@ function getTokenPermissions() {
     };
 }
 
-async function getGHClient() {
+/**
+ * @param {string} repo
+ */
+async function getGHClient(repo) {
     const permissions = getTokenPermissions();
 
     const token = await getGitHubAppAuth().getToken({
-        repositories: githubAppRepositories,
+        repositories: [repo],
         permissions,
     });
 
     const cachedGH = clients.GH;
-    if (cachedGH && cachedGH.token === token) {
+    if (cachedGH && cachedGH.token === token && cachedGH.repo === repo) {
         return cachedGH.api;
     }
 
     const api = new Octokit({ auth: token }).rest;
-    clients.GH = { token, api };
+    clients.GH = { token, repo, api };
     return api;
 }
 
@@ -293,7 +294,7 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }) {
 async function createWorkflowDispatch({ workflowId, info, inputs }) {
     const parameters = createParameters(info, inputs);
 
-    const cli = await getGHClient();
+    const cli = await getGHClient(info.repo);
     await cli.actions.createWorkflowDispatch({
         owner: "microsoft",
         repo: info.repo,
@@ -422,7 +423,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
         const targetBranch = request.match[1];
 
-        const cli = await getGHClient();
+        const cli = await getGHClient(request.repo);
         try {
             await cli.git.getRef({
                 owner: "Microsoft",
@@ -451,7 +452,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         const targetBranch = `release-${request.match[1]}`;
         let targetBranchExists = false;
         try {
-            await (await getGHClient()).git.getRef({
+            await (await getGHClient(request.repo)).git.getRef({
                 owner: "Microsoft",
                 repo: "TypeScript",
                 ref: `heads/${targetBranch}`
@@ -479,7 +480,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
         })
     }, undefined, false))
     .set(/bump release-([\d\.]+)/, createCommand(async (request) => {
-        const cli = await getGHClient();
+        const cli = await getGHClient(request.repo);
         const targetBranch = `release-${request.match[1]}`;
         try {
             await cli.git.getRef({
@@ -566,7 +567,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 error: `Can't invoke autofix workflow automatically on forks.`
             }
         }
-        const cli = await getGHClient();
+        const cli = await getGHClient(request.repo);
         await cli.actions.createWorkflowDispatch({
             owner: "microsoft",
             repo: "TypeScript",
@@ -646,7 +647,7 @@ const testItCommandSuffixes = [
  * @param {WebhookParams} params */
 async function webhook(params) {
     const log = params.log;
-    const cli = await getGHClient();
+    const cli = await getGHClient(params.repo);
 
     let lines = params.commentBody.split("\n").map((line) => line.trim());
     let hasTestIt = false;
