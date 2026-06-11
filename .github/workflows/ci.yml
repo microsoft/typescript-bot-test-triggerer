@@ -33,6 +33,4 @@ jobs:
 
       - run: npm run build
 
-      - run: npm run bundle
-
       - run: node ./dist/GithubCommentReader/index.js

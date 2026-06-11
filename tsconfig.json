@@ -4,9 +4,9 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-    "module": "preserve",
-    "moduleResolution": "bundler",
-    "noEmit": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "sourceMap": true,
     "types": ["node"]
   },
   "include": ["GithubCommentReader/**/*.ts"]

@@ -7,7 +7,6 @@
   "main": "dist/GithubCommentReader/index.js",
   "scripts": {
     "build": "tsc",
-    "bundle": "esbuild --bundle --platform=node --format=esm --target=node22 --external:@azure/functions-core --banner:js=\"import { createRequire as topLevelCreateRequire } from 'node:module'; const require = topLevelCreateRequire(import.meta.url);\" --outfile=dist/GithubCommentReader/index.js GithubCommentReader/index.ts",
     "test": "echo \"Error: no test specified\" && exit 0"
   },
   "author": "",
@@ -28,10 +27,6 @@
     "@octokit/webhooks-types": "^7.6.1",
     "@tsconfig/node22": "^22.0.5",
     "@types/node": "^22.19.21",
-    "esbuild": "^0.28.0",
     "typescript": "^6.0.3"
-  },
-  "allowScripts": {
-    "esbuild@0.28.0": true
   }
 }

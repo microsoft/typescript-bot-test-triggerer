@@ -34,8 +34,8 @@ jobs:
           npm run build --if-present
           npm run test --if-present
 
-      - name: Bundle
-        run: npm run bundle
+      - name: Prune dev dependencies
+        run: npm prune --production
 
       - name: Smoke test
         run: node dist/GithubCommentReader/index.js
@@ -47,7 +47,8 @@ jobs:
           path: |
             host.json
             package.json
-            dist/GithubCommentReader/index.js
+            node_modules
+            dist
 
   deploy:
     runs-on:
