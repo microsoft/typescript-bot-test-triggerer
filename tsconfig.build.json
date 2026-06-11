@@ -1,8 +1,0 @@
-{
-  "extends": "@tsconfig/node22",
-  "compilerOptions": {
-    "strict": true,
-    "skipLibCheck": true
-  },
-  "include": ["GithubCommentReader/github-app-auth.ts"]
-}

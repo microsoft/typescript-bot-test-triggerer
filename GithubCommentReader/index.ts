@@ -1,17 +1,24 @@
-import { app } from "@azure/functions";
+import { app, HttpHandler } from "@azure/functions";
 import { verify as verifyWebhook } from "@octokit/webhooks-methods";
 import { Octokit } from "octokit";
 import vsts from "azure-devops-node-api";
 import assert from "assert";
 import { ManagedIdentityCredential } from "@azure/identity";
 import { CryptographyClient } from "@azure/keyvault-keys";
-import { createGitHubAppAuth } from "./github-app-auth.js";
+import type { AuthorAssociation, WebhookEvent } from "@octokit/webhooks-types";
+import { createGitHubAppAuth, PermissionLevel } from "./github-app-auth.js";
 
 const refreshWindowMs = 1000 * 60 * 5;
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once.
-/** @type {{GH?: { token: string; repo: string; api: Octokit["rest"] }, GHAppAuth?: ReturnType<typeof createGitHubAppAuth>, definitelyTypedGH?: { token: string; api: Octokit["rest"] }, vstsTypescript?: { expiresAt: number; api: vsts.WebApi }}} */
-let clients = {};
+interface Clients {
+    GH?: { token: string; repo: string; api: Octokit["rest"] };
+    GHAppAuth?: ReturnType<typeof createGitHubAppAuth>;
+    definitelyTypedGH?: { token: string; api: Octokit["rest"] };
+    vstsTypescript?: { expiresAt: number; api: vsts.WebApi };
+}
+
+let clients: Clients = {};
 
 function getGitHubAppAuth() {
     const appClientId = process.env.GITHUB_APP_CLIENT_ID || process.env.GITHUB_APP_ID;
@@ -20,10 +27,7 @@ function getGitHubAppAuth() {
     assert(keyId, "GITHUB_APP_KEY_VAULT_KEY_ID must be set when using Key Vault GitHub App auth");
     if (!clients.GHAppAuth) {
         const cryptographyClient = new CryptographyClient(keyId, new ManagedIdentityCredential());
-        /**
-         * @param {string} signingInput
-         */
-        const signer = async (signingInput) => {
+        const signer = async (signingInput: string) => {
             const signature = await cryptographyClient.signData("RS256", Buffer.from(signingInput));
             return Buffer.from(signature.result).toString("base64url");
         };
@@ -36,8 +40,7 @@ function getGitHubAppAuth() {
     return clients.GHAppAuth;
 }
 
-/** @returns {Record<string, "read" | "write" | "admin">} */
-function getTokenPermissions() {
+function getTokenPermissions(): Record<string, PermissionLevel> {
     return {
         actions: "write",
         contents: "read",
@@ -46,10 +49,7 @@ function getTokenPermissions() {
     };
 }
 
-/**
- * @param {string} repo
- */
-async function getGHClient(repo) {
+async function getGHClient(repo: string) {
     const permissions = getTokenPermissions();
 
     const token = await getGitHubAppAuth().getToken({
@@ -99,81 +99,81 @@ async function getVSTSTypeScriptClient() {
 
     const identity = new ManagedIdentityCredential();
     // Scope from https://learn.microsoft.com/en-us/rest/api/azure/devops/tokens/
-    const token = await identity.getToken("499b84ac-1321-427f-aa17-267ca6975798/.default")
+    const token = await identity.getToken("499b84ac-1321-427f-aa17-267ca6975798/.default");
 
-    const api = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getBearerHandler(token.token))
+    const api = new vsts.WebApi("https://typescript.visualstudio.com/defaultcollection", vsts.getBearerHandler(token.token));
     clients.vstsTypescript = { expiresAt: token.expiresOnTimestamp, api };
     return api;
 }
 
-/**
- * @param {number} ms
- */
-async function sleep(ms) {
+async function sleep(ms: number): Promise<void> {
     return new Promise(r => {
         setTimeout(r, ms);
     });
 }
 
-/**
- * @typedef {import("@octokit/webhooks-types").AuthorAssociation} AuthorAssociation
- * @typedef {Awaited<ReturnType<import("octokit").Octokit["rest"]["pulls"]["get"]>>["data"] | undefined} PR
- * @typedef {{ kind: "unresolvedGitHub"; distinctId: string }} UnresolvedGitHubRun
- * @typedef {{ kind: "resolved"; distinctId: string; url: string }} ResolvedRun
- * @typedef {{ kind: "error"; distinctId: string; error: string }} ErrorRun
- * @typedef {UnresolvedGitHubRun | ResolvedRun | ErrorRun} Run
- *
- * @typedef {{
- *     log: (s: string) => void;
- *     match: RegExpMatchArray;
- *     distinctId: string;
- *     issueNumber: number; // TODO(jakebailey): rename this
- *     pr: PR | undefined;
- *     requestingUser: string;
- *     statusCommentId: number; // TODO(jakebailey): rename this
- *     owner: string;
- *     repo: string;
- *     tsgo: boolean;
- * }} RequestInfo
- * @typedef {(request: RequestInfo) => Promise<Run>} CommandFn
- * @typedef {{ fn: CommandFn; authorAssociations: AuthorAssociation[]; prOnly: boolean, tsgoAllowed: boolean }} Command
- */
-void 0;
+type PR = Awaited<ReturnType<Octokit["rest"]["pulls"]["get"]>>["data"] | undefined;
 
-/**
- * @param {CommandFn} fn
- * @param {AuthorAssociation[]} authorAssociations
- * @param {boolean} prOnly
- * @param {boolean} tsgoAllowed
- * @returns {Command}
- */
-function createCommand(fn, authorAssociations = ["MEMBER", "OWNER", "COLLABORATOR"], prOnly = true, tsgoAllowed = false) {
+interface UnresolvedGitHubRun {
+    kind: "unresolvedGitHub";
+    distinctId: string;
+}
+interface ResolvedRun {
+    kind: "resolved";
+    distinctId: string;
+    url: string;
+}
+interface ErrorRun {
+    kind: "error";
+    distinctId: string;
+    error: string;
+}
+type Run = UnresolvedGitHubRun | ResolvedRun | ErrorRun;
+
+interface RequestInfo {
+    log: (s: string) => void;
+    match: RegExpMatchArray;
+    distinctId: string;
+    issueNumber: number; // TODO(jakebailey): rename this
+    pr: PR | undefined;
+    requestingUser: string;
+    statusCommentId: number; // TODO(jakebailey): rename this
+    owner: string;
+    repo: string;
+    tsgo: boolean;
+}
+type CommandFn = (request: RequestInfo) => Promise<Run>;
+interface Command {
+    fn: CommandFn;
+    authorAssociations: AuthorAssociation[];
+    prOnly: boolean;
+    tsgoAllowed: boolean;
+}
+
+function createCommand(
+    fn: CommandFn,
+    authorAssociations: AuthorAssociation[] = ["MEMBER", "OWNER", "COLLABORATOR"],
+    prOnly = true,
+    tsgoAllowed = false,
+): Command {
     return { fn, authorAssociations, prOnly, tsgoAllowed };
 }
 
-/**
- * @typedef {{
- *     definition: {
- *         id: number;
- *     };
- *     project: {
- *         id: string;
- *     };
- *     sourceBranch: string;
- *     sourceVersion: string;
- *     parameters: string;
- *     templateParameters: Record<string, string>
- * }} BuildVars
- */
-void 0;
+interface BuildVars {
+    definition: {
+        id: number;
+    };
+    project: {
+        id: string;
+    };
+    sourceBranch: string;
+    sourceVersion: string;
+    parameters: string;
+    templateParameters: Record<string, string>;
+}
 
-/**
- * @param {RequestInfo} info
- * @param {Record<string, string>} inputs
- */
-function createParameters(info, inputs) {
-    /** @type {Record<string, string>} */
-    const parameters = {
+function createParameters(info: RequestInfo, inputs: Record<string, string>) {
+    const parameters: Record<string, string> = {
         distinct_id: info.distinctId,
         source_issue: `${info.issueNumber}`,
         requesting_user: info.requestingUser,
@@ -191,22 +191,18 @@ function createParameters(info, inputs) {
 
 /**
  * This queues a build using the legacy AzDO build API.
- *
- * @typedef {{
- *    definitionId: number;
- *    sourceBranch: string;
- *    info: RequestInfo;
- *    inputs: Record<string, string>;
- * }} QueueBuildRequest
- *
- * @param {QueueBuildRequest} arg
- * @returns {Promise<ResolvedRun>}
  */
-async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
+interface QueueBuildRequest {
+    definitionId: number;
+    sourceBranch: string;
+    info: RequestInfo;
+    inputs: Record<string, string>;
+}
+
+async function queueBuild({ definitionId, sourceBranch, info, inputs }: QueueBuildRequest): Promise<ResolvedRun> {
     const parameters = createParameters(info, inputs);
 
-    /** @type {BuildVars} */
-    const buildParams = {
+    const buildParams: BuildVars = {
         definition: { id: definitionId },
         project: { id: typeScriptProjectId },
         sourceBranch, // Undocumented, but used by the official frontend
@@ -215,55 +211,49 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }) {
         templateParameters: parameters,
     };
 
-    info.log(`Trigger build ${definitionId} on ${info.issueNumber}`)
+    info.log(`Trigger build ${definitionId} on ${info.issueNumber}`);
     const build = await (await getVSTSTypeScriptClient()).getBuildApi();
     const response = await build.queueBuild(buildParams, "TypeScript");
     return {
         kind: "resolved",
         distinctId: info.distinctId,
-        url: response._links.web.href
+        url: response._links.web.href,
     };
 }
 
-/**
- * @typedef {{
- *     resources?: {
- *         repositories?: Record<string, { refName?: string; version?: string }>;
- *     };
- *     variables?: Record<string, { isSecret?: boolean; value?: string; }>;
- *     templateParameters?: Record<string, string>;
- *     queue?: undefined;
- *     sourceBranch?: undefined;
- *     sourceVersion?: undefined;
- *     parameters?: undefined;
- * }} PipelineRunArgs
- */
+interface PipelineRunArgs {
+    resources?: {
+        repositories?: Record<string, { refName?: string; version?: string }>;
+    };
+    variables?: Record<string, { isSecret?: boolean; value?: string; }>;
+    templateParameters?: Record<string, string>;
+    queue?: undefined;
+    sourceBranch?: undefined;
+    sourceVersion?: undefined;
+    parameters?: undefined;
+}
 
 /**
  * This queues a build using the AzDO Pipelines API.
- *
- * @typedef {{
-*    definitionId: number;
-*    repositories: Record<string, { refName?: string; version?: string }>
-*    info: RequestInfo;
-*    inputs: Record<string, string>;
-* }} CreatePipelineRunRequest
-*
-* @param {CreatePipelineRunRequest} arg
-* @returns {Promise<ResolvedRun>}
-*/
-async function createPipelineRun({ definitionId, repositories, info, inputs }) {
+ */
+interface CreatePipelineRunRequest {
+    definitionId: number;
+    repositories: Record<string, { refName?: string; version?: string }>;
+    info: RequestInfo;
+    inputs: Record<string, string>;
+}
+
+async function createPipelineRun({ definitionId, repositories, info, inputs }: CreatePipelineRunRequest): Promise<ResolvedRun> {
     const parameters = createParameters(info, inputs);
 
-    /** @type {PipelineRunArgs} */
-    const args = {
+    const args: PipelineRunArgs = {
         resources: {
             repositories,
         },
         templateParameters: parameters,
-    }
+    };
 
-    info.log(`Trigger pipeline ${definitionId} on ${info.issueNumber}`)
+    info.log(`Trigger pipeline ${definitionId} on ${info.issueNumber}`);
     const api = await (await getVSTSTypeScriptClient()).getPipelinesApi();
     const result = await api.runPipeline(args, typeScriptProjectId, definitionId);
     return {
@@ -274,24 +264,15 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }) {
 }
 
 /**
- * @param {string} workflowId
- * @param {{ distinct_id: string; issue_number: string; status_comment_id: string }} info
- * @param {Record<string, string>} inputs
- */
-
-/**
  * This queues a build using the AzDO Pipelines API.
- *
- * @typedef {{
-*    workflowId: string;
-*    info: RequestInfo;
-*    inputs: Record<string, string>;
-* }} CreateWorkflowDispatchRequest
-*
-* @param {CreateWorkflowDispatchRequest} arg
-* @returns {Promise<UnresolvedGitHubRun>}
-*/
-async function createWorkflowDispatch({ workflowId, info, inputs }) {
+ */
+interface CreateWorkflowDispatchRequest {
+    workflowId: string;
+    info: RequestInfo;
+    inputs: Record<string, string>;
+}
+
+async function createWorkflowDispatch({ workflowId, info, inputs }: CreateWorkflowDispatchRequest): Promise<UnresolvedGitHubRun> {
     const parameters = createParameters(info, inputs);
 
     const cli = await getGHClient(info.repo);
@@ -305,12 +286,12 @@ async function createWorkflowDispatch({ workflowId, info, inputs }) {
 
     return {
         kind: "unresolvedGitHub",
-        distinctId: info.distinctId
-    }
+        distinctId: info.distinctId,
+    };
 }
 
 
-const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
+const commands = new Map<RegExp, Command>()
     .set(/pack this/, createCommand((request) => {
         return queueBuild({
             definitionId: 19,
@@ -510,8 +491,7 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
                 error: `Branch \`${targetBranch}\` does not have a package.json`
             }
         }
-        /** @type {string} */
-        let currentVersion;
+        let currentVersion: string;
         try {
             const packageContent = JSON.parse(Buffer.from(contentResponse.data.content, "base64").toString("utf-8"));
             currentVersion = packageContent.version;
@@ -584,10 +564,9 @@ const commands = (/** @type {Map<RegExp, Command>} */ (new Map()))
 const botCalls = ["@typescript-bot", "@typescript-automation"];
 
 /**
- * @param {string} line
- * @returns {string | undefined} The remainder of the line after the bot call, or undefined if not a bot call.
+ * @returns The remainder of the line after the bot call, or undefined if not a bot call.
  */
-function matchBotCall(line) {
+function matchBotCall(line: string): string | undefined {
     for (const call of botCalls) {
         if (line.startsWith(call)) {
             return line.slice(call.length).trim();
@@ -596,25 +575,16 @@ function matchBotCall(line) {
     return undefined;
 }
 
-/**
- * @param {string} distinctId
- */
-function getStatusPlaceholder(distinctId) {
+function getStatusPlaceholder(distinctId: string) {
     return `<!--status-${distinctId}-start-->🔄<!--status-${distinctId}-end-->`;
 }
 
-/**
- * @param {string} distinctId
- */
-function getResultPlaceholder(distinctId) {
+function getResultPlaceholder(distinctId: string) {
     // This string is known to other workflows/pipelines. Do not change without updating everything.
     return `<!--result-${distinctId}-->`;
 }
 
-/**
- * @param {string} s
- */
-function asMarkdownInlineCode(s) {
+function asMarkdownInlineCode(s: string) {
     let backticks = "`";
     let space = "";
     while (s.includes(backticks)) {
@@ -632,20 +602,19 @@ const testItCommandSuffixes = [
     "perf test this faster",
 ];
 
-/**
- * @typedef {{
- *     log: (s: string) => void;
- *     issueNumber: number;
- *     commentId: number;
- *     commentBody: string;
- *     commentIsFromIssue: boolean;
- *     isPr: boolean;
- *     commentUser: string;
- *     authorAssociation: AuthorAssociation;
- *     repo: string;
- * }} WebhookParams
- * @param {WebhookParams} params */
-async function webhook(params) {
+interface WebhookParams {
+    log: (s: string) => void;
+    issueNumber: number;
+    commentId: number;
+    commentBody: string;
+    commentIsFromIssue: boolean;
+    isPr: boolean;
+    commentUser: string;
+    authorAssociation: AuthorAssociation;
+    repo: string;
+}
+
+async function webhook(params: WebhookParams) {
     const log = params.log;
     const cli = await getGHClient(params.repo);
 
@@ -680,8 +649,7 @@ async function webhook(params) {
         return;
     }
 
-    /** @type {{ name: string; match: RegExpExecArray; fn: CommandFn; }[]} */
-    let commandsToRun = [];
+    let commandsToRun: { name: string; match: RegExpExecArray; fn: CommandFn; }[] = [];
 
     for (const line of lines) {
         let rest = matchBotCall(line);
@@ -720,8 +688,7 @@ async function webhook(params) {
         log(`Failed to react to comment: ${e}`);
     }
 
-    /** @type {PR | undefined} */
-    let pr;
+    let pr: PR | undefined;
 
     if (params.isPr) {
         pr = (await cli.pulls.get({ pull_number: params.issueNumber, owner: "microsoft", repo: params.repo })).data;
@@ -765,8 +732,7 @@ ${commandInfos.map(({ name, distinctId }) =>
     const statusCommentId = statusComment.data.id;
 
     log("Starting runs...")
-    /** @type {Run[]} */
-    const startedRuns = await Promise.all(commandInfos.map(async ({ match, fn, distinctId }) => {
+    const startedRuns: Run[] = await Promise.all(commandInfos.map(async ({ match, fn, distinctId }) => {
         try {
             return await fn({
                 match,
@@ -782,7 +748,7 @@ ${commandInfos.map(({ name, distinctId }) =>
             });
         } catch (e) {
             // TODO: short error message
-            log(/** @type {any} */(e)?.stack)
+            log((e as any)?.stack)
             return { kind: "error", distinctId, error: `${e}` };
         }
     }));
@@ -871,8 +837,7 @@ ${commandInfos.map(({ name, distinctId }) =>
     log("Updated comment with build links");
 }
 
-/** @type {import("@azure/functions").HttpHandler} */
-async function handler(request, context) {
+const handler: HttpHandler = async function (request, context) {
     context.log("Received request");
     const body = await request.text();
 
@@ -884,8 +849,7 @@ async function handler(request, context) {
         return {};
     }
 
-    /** @type {import("@octokit/webhooks-types").WebhookEvent} */
-    const event = JSON.parse(body);
+    const event: WebhookEvent = JSON.parse(body);
     context.log("Inspecting comment...");
 
     const isNewComment = "action" in event

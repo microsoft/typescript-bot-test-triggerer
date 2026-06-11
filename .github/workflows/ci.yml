@@ -31,8 +31,8 @@ jobs:
       
       - run: npm ci
 
-      - run: npx tsc
-
       - run: npm run build
-      
-      - run: node ./GithubCommentReader/index.js
+
+      - run: npm run bundle
+
+      - run: node ./dist/GithubCommentReader/index.js

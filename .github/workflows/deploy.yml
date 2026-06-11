@@ -33,7 +33,12 @@ jobs:
           npm install
           npm run build --if-present
           npm run test --if-present
-          npm prune --production
+
+      - name: Bundle
+        run: npm run bundle
+
+      - name: Smoke test
+        run: node dist/GithubCommentReader/index.js
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -42,8 +47,7 @@ jobs:
           path: |
             host.json
             package.json
-            node_modules
-            GithubCommentReader
+            dist/GithubCommentReader/index.js
 
   deploy:
     runs-on:

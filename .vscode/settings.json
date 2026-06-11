@@ -1,6 +1,6 @@
 {
   "azureFunctions.projectRuntime": "~4",
-  "azureFunctions.projectLanguage": "JavaScript",
+  "azureFunctions.projectLanguage": "TypeScript",
   "azureFunctions.templateFilter": "Verified",
   "azureFunctions.deploySubpath": ".",
   "debug.internalConsoleOptions": "neverOpen",
