@@ -221,9 +221,11 @@ async function queueBuild({ definitionId, sourceBranch, info, inputs }: QueueBui
     };
 }
 
+type PipelineRepositories = Record<string, { refName?: string; version?: string }>;
+
 interface PipelineRunArgs {
     resources?: {
-        repositories?: Record<string, { refName?: string; version?: string }>;
+        repositories?: PipelineRepositories;
     };
     variables?: Record<string, { isSecret?: boolean; value?: string; }>;
     templateParameters?: Record<string, string>;
@@ -238,7 +240,7 @@ interface PipelineRunArgs {
  */
 interface CreatePipelineRunRequest {
     definitionId: number;
-    repositories: Record<string, { refName?: string; version?: string }>;
+    repositories?: PipelineRepositories;
     info: RequestInfo;
     inputs: Record<string, string>;
 }
@@ -247,11 +249,11 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }: C
     const parameters = createParameters(info, inputs);
 
     const args: PipelineRunArgs = {
-        resources: {
-            repositories,
-        },
         templateParameters: parameters,
     };
+    if (repositories) {
+        args.resources = { repositories };
+    }
 
     info.log(`Trigger pipeline ${definitionId} on ${info.issueNumber}`);
     const api = await (await getVSTSTypeScriptClient()).getPipelinesApi();
@@ -335,9 +337,8 @@ const commands = new Map<RegExp, Command>()
     }))
     .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
         assert(request.pr);
-        return queueBuild({
+        return createPipelineRun({
             definitionId: 47,
-            sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
@@ -348,9 +349,8 @@ const commands = new Map<RegExp, Command>()
     }))
     .set(/user test tsserver/, createCommand(async (request) => {
         assert(request.pr);
-        return queueBuild({
+        return createPipelineRun({
             definitionId: 47,
-            sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
@@ -363,9 +363,8 @@ const commands = new Map<RegExp, Command>()
     }))
     .set(/test top(\d{1,3})/, createCommand(async (request) => {
         assert(request.pr);
-        return queueBuild({
+        return createPipelineRun({
             definitionId: 47,
-            sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
@@ -382,9 +381,8 @@ const commands = new Map<RegExp, Command>()
     ))
     .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
         assert(request.pr);
-        return queueBuild({
+        return createPipelineRun({
             definitionId: 47,
-            sourceBranch: "",
             info: request,
             inputs: {
                 post_result: "true",
