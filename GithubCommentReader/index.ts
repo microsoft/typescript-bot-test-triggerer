@@ -143,11 +143,13 @@ interface RequestInfo {
     tsgo: boolean;
 }
 type CommandFn = (request: RequestInfo) => Promise<Run>;
+type CommandDisplayName = (name: string, match: RegExpExecArray) => string;
 interface Command {
     fn: CommandFn;
     authorAssociations: AuthorAssociation[];
     prOnly: boolean;
     tsgoAllowed: boolean;
+    displayName?: CommandDisplayName;
 }
 
 function createCommand(
@@ -155,8 +157,21 @@ function createCommand(
     authorAssociations: AuthorAssociation[] = ["MEMBER", "OWNER", "COLLABORATOR"],
     prOnly = true,
     tsgoAllowed = false,
+    displayName?: CommandDisplayName,
 ): Command {
-    return { fn, authorAssociations, prOnly, tsgoAllowed };
+    return { fn, authorAssociations, prOnly, tsgoAllowed, displayName };
+}
+
+const topRepoCountLimit = 1000;
+
+function getTopRepoCount(repoCount: string) {
+    return Math.min(+repoCount, topRepoCountLimit);
+}
+
+function getTopRepoDisplayName(name: string, match: RegExpExecArray) {
+    const repoCount = `${getTopRepoCount(match[1])}`;
+    const cappedMatch = match[0].replace(match[1], repoCount);
+    return name.slice(0, match.index) + cappedMatch + name.slice(match.index + match[0].length);
 }
 
 interface BuildVars {
@@ -361,7 +376,7 @@ const commands = new Map<RegExp, Command>()
             }
         })
     }))
-    .set(/test top(\d{1,3})/, createCommand(async (request) => {
+    .set(/test top(\d+)/, createCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
             definitionId: 47,
@@ -371,15 +386,16 @@ const commands = new Map<RegExp, Command>()
                 old_ts_repo_url: request.pr.base.repo.clone_url,
                 old_head_ref: request.pr.base.ref,
                 top_repos: "true",
-                repo_count: `${Math.max(+request.match[1], 400)}`,
+                repo_count: `${getTopRepoCount(request.match[1])}`,
             }
         })
     },
         /* authorAssociations */ undefined,
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
+        getTopRepoDisplayName,
     ))
-    .set(/test tsserver top(\d{1,3})/, createCommand(async (request) => {
+    .set(/test tsserver top(\d+)/, createCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
             definitionId: 47,
@@ -389,7 +405,7 @@ const commands = new Map<RegExp, Command>()
                 old_ts_repo_url: request.pr.base.repo.clone_url,
                 old_head_ref: request.pr.base.ref,
                 top_repos: "true",
-                repo_count: `${Math.max(+request.match[1], 200)}`,
+                repo_count: `${getTopRepoCount(request.match[1])}`,
                 entrypoint: "tsserver",
                 prng_seed: `${request.pr.id}`,
             }
@@ -398,6 +414,7 @@ const commands = new Map<RegExp, Command>()
         /* authorAssociations */ undefined,
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
+        getTopRepoDisplayName,
     ))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
         const targetBranch = request.match[1];
@@ -664,7 +681,7 @@ async function webhook(params: WebhookParams) {
             if (!match) {
                 continue;
             }
-            commandsToRun.push({ name: rest, match, fn: command.fn });
+            commandsToRun.push({ name: command.displayName?.(rest, match) ?? rest, match, fn: command.fn });
         }
     }
 
