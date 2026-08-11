@@ -859,7 +859,7 @@ const handler: HttpHandler = async function (request, context) {
     const sig = request.headers.get("x-hub-signature-256");
     const webhookToken = process.env.WEBHOOK_TOKEN;
     assert(webhookToken, "WEBHOOK_TOKEN is not set")
-    if (!sig || !verifyWebhook(webhookToken, body, `sha256=${sig}`)) {
+    if (!sig || !(await verifyWebhook(webhookToken, body, `sha256=${sig}`))) {
         context.log("Invalid signature");
         return {};
     }
