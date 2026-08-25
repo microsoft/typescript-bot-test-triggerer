@@ -5,7 +5,7 @@ import vsts from "azure-devops-node-api";
 import assert from "assert";
 import { ManagedIdentityCredential } from "@azure/identity";
 import { CryptographyClient } from "@azure/keyvault-keys";
-import type { AuthorAssociation, WebhookEvent } from "@octokit/webhooks-types";
+import type { WebhookEvent } from "@octokit/webhooks-types";
 import { createGitHubAppAuth, PermissionLevel } from "./github-app-auth.js";
 
 const refreshWindowMs = 1000 * 60 * 5;
@@ -45,6 +45,7 @@ function getTokenPermissions(): Record<string, PermissionLevel> {
         actions: "write",
         contents: "read",
         issues: "write",
+        members: "read",
         pull_requests: "write",
     };
 }
@@ -65,6 +66,29 @@ async function getGHClient(repo: string) {
     const api = new Octokit({ auth: token }).rest;
     clients.GH = { token, repo, api };
     return api;
+}
+
+function isHttpErrorWithStatus(error: unknown, status: number): boolean {
+    return typeof error === "object"
+        && error !== null
+        && "status" in error
+        && error.status === status;
+}
+
+async function isTypeScriptTeamMember(api: Octokit["rest"], username: string): Promise<boolean> {
+    try {
+        const response = await api.teams.getMembershipForUserInOrg({
+            org: "microsoft",
+            team_slug: "typescript",
+            username,
+        });
+        return response.data.state === "active";
+    } catch (error) {
+        if (isHttpErrorWithStatus(error, 404)) {
+            return false;
+        }
+        throw error;
+    }
 }
 
 async function getDefinitelyTypedGHClient() {
@@ -146,7 +170,6 @@ type CommandFn = (request: RequestInfo) => Promise<Run>;
 type CommandDisplayName = (name: string, match: RegExpExecArray) => string;
 interface Command {
     fn: CommandFn;
-    authorAssociations: AuthorAssociation[];
     prOnly: boolean;
     tsgoAllowed: boolean;
     displayName?: CommandDisplayName;
@@ -154,12 +177,11 @@ interface Command {
 
 function createCommand(
     fn: CommandFn,
-    authorAssociations: AuthorAssociation[] = ["MEMBER", "OWNER", "COLLABORATOR"],
     prOnly = true,
     tsgoAllowed = false,
     displayName?: CommandDisplayName,
 ): Command {
-    return { fn, authorAssociations, prOnly, tsgoAllowed, displayName };
+    return { fn, prOnly, tsgoAllowed, displayName };
 }
 
 const topRepoCountLimit = 1000;
@@ -336,7 +358,6 @@ const commands = new Map<RegExp, Command>()
             }
         })
     },
-        /* authorAssociations */ undefined,
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
@@ -390,7 +411,6 @@ const commands = new Map<RegExp, Command>()
             }
         })
     },
-        /* authorAssociations */ undefined,
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
         getTopRepoDisplayName,
@@ -411,7 +431,6 @@ const commands = new Map<RegExp, Command>()
             }
         })
     },
-        /* authorAssociations */ undefined,
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
         getTopRepoDisplayName,
@@ -625,7 +644,6 @@ interface WebhookParams {
     commentIsFromIssue: boolean;
     isPr: boolean;
     commentUser: string;
-    authorAssociation: AuthorAssociation;
     repo: string;
 }
 
@@ -656,7 +674,7 @@ async function webhook(params: WebhookParams) {
         if (tsgo && !command.tsgoAllowed) {
             return false;
         }
-        return command.authorAssociations.includes(params.authorAssociation);
+        return true;
     });
 
     if (applicableCommands.length === 0) {
@@ -687,6 +705,11 @@ async function webhook(params: WebhookParams) {
 
     log(`Found ${commandsToRun.length} commands to run`);
     if (commandsToRun.length === 0) {
+        return;
+    }
+
+    if (!await isTypeScriptTeamMember(cli, params.commentUser)) {
+        log(`Ignoring commands from ${params.commentUser}, who is not an active member of microsoft/typescript`);
         return;
     }
 
@@ -901,7 +924,6 @@ const handler: HttpHandler = async function (request, context) {
             commentIsFromIssue,
             isPr,
             commentUser: comment.user.login,
-            authorAssociation: comment.author_association,
             repo: repoName,
         });
     } catch (e) {
