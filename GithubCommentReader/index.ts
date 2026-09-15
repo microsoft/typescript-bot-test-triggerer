@@ -224,6 +224,7 @@ interface BuildVars {
     sourceVersion: string;
     parameters: string;
     templateParameters: Record<string, string>;
+    variables: Record<string, { value: string; }>;
 }
 
 function createParameters(info: RequestInfo, inputs: Record<string, string>) {
@@ -258,20 +259,26 @@ function createPrSnapshotParameters(info: RequestInfo) {
 interface QueueBuildRequest {
     definitionId: number;
     sourceBranch: string;
+    prSnapshot: PrSnapshot;
     info: RequestInfo;
     inputs: Record<string, string>;
 }
 
-async function queueBuild({ definitionId, sourceBranch, info, inputs }: QueueBuildRequest): Promise<ResolvedRun> {
+async function queueBuild({ definitionId, sourceBranch, prSnapshot, info, inputs }: QueueBuildRequest): Promise<ResolvedRun> {
     const parameters = createParameters(info, inputs);
 
     const buildParams: BuildVars = {
         definition: { id: definitionId },
         project: { id: typeScriptProjectId },
         sourceBranch, // Undocumented, but used by the official frontend
-        sourceVersion: ``, // Also undocumented
+        sourceVersion: prSnapshot.mergeSha, // Also undocumented
         parameters: JSON.stringify(parameters), // This API is real bad
         templateParameters: parameters,
+        variables: {
+            expected_head_sha: { value: prSnapshot.headSha },
+            expected_base_sha: { value: prSnapshot.baseSha },
+            expected_merge_sha: { value: prSnapshot.mergeSha },
+        },
     };
 
     info.log(`Trigger build ${definitionId} on ${info.issueNumber}`);
@@ -357,10 +364,12 @@ async function createWorkflowDispatch({ workflowId, info, inputs }: CreateWorkfl
 
 
 const commands = new Map<RegExp, Command>()
-    .set(/pack this/, createCommand((request) => {
+    .set(/pack this/, createPrSnapshotCommand((request) => {
+        assert(request.prSnapshot);
         return queueBuild({
             definitionId: 19,
             sourceBranch: `refs/pull/${request.issueNumber}/merge`,
+            prSnapshot: request.prSnapshot,
             info: request,
             inputs: {}
         })
@@ -391,10 +400,12 @@ const commands = new Map<RegExp, Command>()
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
-    .set(/run dt/, createCommand(async (request) => {
+    .set(/run dt/, createPrSnapshotCommand(async (request) => {
+        assert(request.prSnapshot);
         return queueBuild({
             definitionId: 23,
             sourceBranch: `refs/pull/${request.issueNumber}/merge`,
+            prSnapshot: request.prSnapshot,
             info: request,
             inputs: {
                 DT_SHA: await getDefinitelyTypedMasterSha()
