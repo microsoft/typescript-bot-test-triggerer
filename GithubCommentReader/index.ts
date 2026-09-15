@@ -703,7 +703,7 @@ interface WebhookParams {
     repo: string;
 }
 
-const prQuietPeriodMs = 60 * 1000;
+const prQuietPeriodMs = 2 * 60 * 1000;
 
 async function webhook(params: WebhookParams) {
     const log = params.log;
@@ -837,12 +837,14 @@ async function webhook(params: WebhookParams) {
             const mergeCreatedAt = mergeCommit.commit.committer?.date;
             assert(mergeCreatedAt, "GitHub did not return a merge commit date");
             const quietForMs = new Date(params.commentCreatedAt).getTime() - new Date(mergeCreatedAt).getTime();
-            if (quietForMs < prQuietPeriodMs) {
+            const prAuthorIsTeamMember = pr.user.login === params.commentUser
+                || await isTypeScriptTeamMember(cli, pr.user.login);
+            if (!prAuthorIsTeamMember && quietForMs < prQuietPeriodMs) {
                 await cli.issues.createComment({
                     owner: "microsoft",
                     repo: params.repo,
                     issue_number: params.issueNumber,
-                    body: `Hey @${params.commentUser}, this PR was updated less than a minute before this command. Please wait until it has been unchanged for a minute and try again.`,
+                    body: `Hey @${params.commentUser}, this PR was updated less than two minutes before this command. Please wait until it has been unchanged for two minutes and try again.`,
                 });
                 return;
             }
