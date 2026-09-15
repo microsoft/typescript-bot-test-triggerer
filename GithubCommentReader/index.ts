@@ -138,6 +138,12 @@ async function sleep(ms: number): Promise<void> {
 
 type PR = Awaited<ReturnType<Octokit["rest"]["pulls"]["get"]>>["data"] | undefined;
 
+interface PrSnapshot {
+    headSha: string;
+    baseSha: string;
+    mergeSha: string;
+}
+
 interface UnresolvedGitHubRun {
     kind: "unresolvedGitHub";
     distinctId: string;
@@ -160,6 +166,7 @@ interface RequestInfo {
     distinctId: string;
     issueNumber: number; // TODO(jakebailey): rename this
     pr: PR | undefined;
+    prSnapshot: PrSnapshot | undefined;
     requestingUser: string;
     statusCommentId: number; // TODO(jakebailey): rename this
     owner: string;
@@ -172,6 +179,7 @@ interface Command {
     fn: CommandFn;
     prOnly: boolean;
     tsgoAllowed: boolean;
+    requiresPrSnapshot: boolean;
     displayName?: CommandDisplayName;
 }
 
@@ -181,7 +189,16 @@ function createCommand(
     tsgoAllowed = false,
     displayName?: CommandDisplayName,
 ): Command {
-    return { fn, prOnly, tsgoAllowed, displayName };
+    return { fn, prOnly, tsgoAllowed, requiresPrSnapshot: false, displayName };
+}
+
+function createPrSnapshotCommand(
+    fn: CommandFn,
+    prOnly = true,
+    tsgoAllowed = false,
+    displayName?: CommandDisplayName,
+): Command {
+    return { ...createCommand(fn, prOnly, tsgoAllowed, displayName), requiresPrSnapshot: true };
 }
 
 const topRepoCountLimit = 1000;
@@ -224,6 +241,15 @@ function createParameters(info: RequestInfo, inputs: Record<string, string>) {
     Object.assign(parameters, inputs);
 
     return parameters;
+}
+
+function createPrSnapshotParameters(info: RequestInfo) {
+    assert(info.prSnapshot);
+    return {
+        expected_head_sha: info.prSnapshot.headSha,
+        expected_base_sha: info.prSnapshot.baseSha,
+        expected_merge_sha: info.prSnapshot.mergeSha,
+    };
 }
 
 /**
@@ -339,20 +365,24 @@ const commands = new Map<RegExp, Command>()
             inputs: {}
         })
     }))
-    .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createCommand((request) => {
+    .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createPrSnapshotCommand((request) => {
+        assert(request.prSnapshot);
         return createPipelineRun({
             definitionId: 69,
             repositories: request.tsgo ? {
                 "typescript-go": {
                     refName: `refs/pull/${request.issueNumber}/merge`,
+                    version: request.prSnapshot.mergeSha,
                 }
             } : {
                 TypeScript: {
                     refName: `refs/pull/${request.issueNumber}/merge`,
+                    version: request.prSnapshot.mergeSha,
                 }
             },
             info: request,
             inputs: {
+                ...createPrSnapshotParameters(request),
                 tsperf_preset: request.match[1] || "regular",
                 ts_go: request.tsgo ? "true" : "false",
             }
@@ -371,24 +401,26 @@ const commands = new Map<RegExp, Command>()
             }
         })
     }))
-    .set(/user test this(?: inline)?(?! slower)/, createCommand(async (request) => {
+    .set(/user test this(?: inline)?(?! slower)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
             definitionId: 47,
             info: request,
             inputs: {
+                ...createPrSnapshotParameters(request),
                 post_result: "true",
                 old_ts_repo_url: request.pr.base.repo.clone_url,
                 old_head_ref: request.pr.base.ref
             }
         })
     }))
-    .set(/user test tsserver/, createCommand(async (request) => {
+    .set(/user test tsserver/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
             definitionId: 47,
             info: request,
             inputs: {
+                ...createPrSnapshotParameters(request),
                 post_result: "true",
                 old_ts_repo_url: request.pr.base.repo.clone_url,
                 old_head_ref: request.pr.base.ref,
@@ -397,12 +429,13 @@ const commands = new Map<RegExp, Command>()
             }
         })
     }))
-    .set(/test top(\d+)/, createCommand(async (request) => {
+    .set(/test top(\d+)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
             definitionId: 47,
             info: request,
             inputs: {
+                ...createPrSnapshotParameters(request),
                 post_result: "true",
                 old_ts_repo_url: request.pr.base.repo.clone_url,
                 old_head_ref: request.pr.base.ref,
@@ -415,12 +448,13 @@ const commands = new Map<RegExp, Command>()
         /* tsgoAllowed */ true,
         getTopRepoDisplayName,
     ))
-    .set(/test tsserver top(\d+)/, createCommand(async (request) => {
+    .set(/test tsserver top(\d+)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
             definitionId: 47,
             info: request,
             inputs: {
+                ...createPrSnapshotParameters(request),
                 post_result: "true",
                 old_ts_repo_url: request.pr.base.repo.clone_url,
                 old_head_ref: request.pr.base.ref,
@@ -641,11 +675,15 @@ interface WebhookParams {
     issueNumber: number;
     commentId: number;
     commentBody: string;
+    commentCreatedAt: string;
+    commentCommitId: string | undefined;
     commentIsFromIssue: boolean;
     isPr: boolean;
     commentUser: string;
     repo: string;
 }
+
+const prQuietPeriodMs = 60 * 1000;
 
 async function webhook(params: WebhookParams) {
     const log = params.log;
@@ -682,7 +720,7 @@ async function webhook(params: WebhookParams) {
         return;
     }
 
-    let commandsToRun: { name: string; match: RegExpExecArray; fn: CommandFn; }[] = [];
+    let commandsToRun: { name: string; match: RegExpExecArray; fn: CommandFn; requiresPrSnapshot: boolean; }[] = [];
 
     for (const line of lines) {
         let rest = matchBotCall(line);
@@ -699,7 +737,12 @@ async function webhook(params: WebhookParams) {
             if (!match) {
                 continue;
             }
-            commandsToRun.push({ name: command.displayName?.(rest, match) ?? rest, match, fn: command.fn });
+            commandsToRun.push({
+                name: command.displayName?.(rest, match) ?? rest,
+                match,
+                fn: command.fn,
+                requiresPrSnapshot: command.requiresPrSnapshot,
+            });
         }
     }
 
@@ -727,11 +770,12 @@ async function webhook(params: WebhookParams) {
     }
 
     let pr: PR | undefined;
+    let prSnapshot: PrSnapshot | undefined;
 
     if (params.isPr) {
         pr = (await cli.pulls.get({ pull_number: params.issueNumber, owner: "microsoft", repo: params.repo })).data;
 
-        if (!pr.merged && !pr.mergeable) {
+        if (!pr.merged && pr.mergeable !== true) {
             await cli.issues.createComment({
                 owner: "microsoft",
                 repo: params.repo,
@@ -739,6 +783,55 @@ async function webhook(params: WebhookParams) {
                 body: `Hey @${params.commentUser}, this PR is in an unmergable state, so is missing a merge commit to run against; please resolve conflicts and try again.`,
             });
             return;
+        }
+
+        if (commandsToRun.some((command) => command.requiresPrSnapshot)) {
+            if (params.commentCommitId && params.commentCommitId !== pr.head.sha) {
+                await cli.issues.createComment({
+                    owner: "microsoft",
+                    repo: params.repo,
+                    issue_number: params.issueNumber,
+                    body: `Hey @${params.commentUser}, this review was submitted for an older commit. Please review the latest commit and try again.`,
+                });
+                return;
+            }
+
+            const mergeSha = pr.merge_commit_sha;
+            assert(mergeSha, "GitHub did not return a merge commit");
+            const mergeCommit = (await cli.repos.getCommit({
+                owner: "microsoft",
+                repo: params.repo,
+                ref: mergeSha,
+            })).data;
+            const parentShas = mergeCommit.parents.map((parent) => parent.sha);
+            if (parentShas[0] !== pr.base.sha || parentShas[1] !== pr.head.sha) {
+                await cli.issues.createComment({
+                    owner: "microsoft",
+                    repo: params.repo,
+                    issue_number: params.issueNumber,
+                    body: `Hey @${params.commentUser}, this PR changed while I was preparing the test run. Please try again.`,
+                });
+                return;
+            }
+
+            const mergeCreatedAt = mergeCommit.commit.committer?.date;
+            assert(mergeCreatedAt, "GitHub did not return a merge commit date");
+            const quietForMs = new Date(params.commentCreatedAt).getTime() - new Date(mergeCreatedAt).getTime();
+            if (quietForMs < prQuietPeriodMs) {
+                await cli.issues.createComment({
+                    owner: "microsoft",
+                    repo: params.repo,
+                    issue_number: params.issueNumber,
+                    body: `Hey @${params.commentUser}, this PR was updated less than a minute before this command. Please wait until it has been unchanged for a minute and try again.`,
+                });
+                return;
+            }
+
+            prSnapshot = {
+                headSha: pr.head.sha,
+                baseSha: pr.base.sha,
+                mergeSha,
+            };
         }
     }
 
@@ -779,6 +872,7 @@ ${commandInfos.map(({ name, distinctId }) =>
                 statusCommentId: statusCommentId,
                 requestingUser: params.commentUser,
                 pr,
+                prSnapshot,
                 log: log,
                 owner: "microsoft",
                 repo: params.repo,
@@ -903,6 +997,8 @@ const handler: HttpHandler = async function (request, context) {
     const repoName = event.repository.name;
     const commentIsFromIssue = "comment" in event;
     const comment = commentIsFromIssue ? event.comment : event.review;
+    const commentCreatedAt = commentIsFromIssue ? event.comment.created_at : event.review.submitted_at;
+    assert(commentCreatedAt, "Comment creation date is missing");
     if (!comment.body) {
         context.log("No comment body")
         return {};
@@ -921,6 +1017,8 @@ const handler: HttpHandler = async function (request, context) {
             issueNumber,
             commentId: comment.id,
             commentBody: comment.body,
+            commentCreatedAt,
+            commentCommitId: commentIsFromIssue ? undefined : event.review.commit_id,
             commentIsFromIssue,
             isPr,
             commentUser: comment.user.login,
