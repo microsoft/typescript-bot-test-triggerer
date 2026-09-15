@@ -481,6 +481,15 @@ const commands = new Map<RegExp, Command>()
         getTopRepoDisplayName,
     ))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
+        assert(request.pr);
+        if (!request.pr.merged || !request.pr.merge_commit_sha) {
+            return {
+                kind: "error",
+                distinctId: request.distinctId,
+                error: `PR #${request.issueNumber} has not been merged.`
+            }
+        }
+
         const targetBranch = request.match[1];
 
         const cli = await getGHClient(request.repo);
