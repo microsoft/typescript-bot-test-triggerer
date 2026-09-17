@@ -402,15 +402,20 @@ const commands = new Map<RegExp, Command>()
     ))
     .set(/run dt/, createPrSnapshotCommand(async (request) => {
         assert(request.prSnapshot);
-        return queueBuild({
-            definitionId: 23,
-            sourceBranch: `refs/pull/${request.issueNumber}/merge`,
-            prSnapshot: request.prSnapshot,
+        return createPipelineRun({
+            definitionId: 0, // TODO: Replace with the DefinitelyTyped-tools pipeline definition ID.
+            repositories: {
+                TypeScript: {
+                    refName: `refs/pull/${request.issueNumber}/merge`,
+                    version: request.prSnapshot.mergeSha,
+                },
+            },
             info: request,
             inputs: {
-                DT_SHA: await getDefinitelyTypedMasterSha()
-            }
-        })
+                ...createPrSnapshotParameters(request),
+                DT_SHA: await getDefinitelyTypedMasterSha(),
+            },
+        });
     }))
     .set(/user test this(?: inline)?(?! slower)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
