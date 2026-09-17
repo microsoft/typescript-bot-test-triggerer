@@ -14,7 +14,6 @@ const refreshWindowMs = 1000 * 60 * 5;
 interface Clients {
     GH?: { token: string; repo: string; api: Octokit["rest"] };
     GHAppAuth?: ReturnType<typeof createGitHubAppAuth>;
-    definitelyTypedGH?: { token: string; api: Octokit["rest"] };
     vstsTypescript?: { expiresAt: number; api: vsts.WebApi };
 }
 
@@ -89,27 +88,6 @@ async function isTypeScriptTeamMember(api: Octokit["rest"], username: string): P
         }
         throw error;
     }
-}
-
-async function getDefinitelyTypedGHClient() {
-    const token = await getGitHubAppAuth().getToken({
-        owner: "DefinitelyTyped",
-        repositories: ["DefinitelyTyped"],
-        permissions: { contents: "read" },
-    });
-
-    if (clients.definitelyTypedGH?.token === token) {
-        return clients.definitelyTypedGH.api;
-    }
-
-    const api = new Octokit({ auth: token }).rest;
-    clients.definitelyTypedGH = { token, api };
-    return api;
-}
-
-async function getDefinitelyTypedMasterSha() {
-    const api = await getDefinitelyTypedGHClient();
-    return (await api.repos.getBranch({ owner: "DefinitelyTyped", repo: "DefinitelyTyped", branch: "master" })).data.commit.sha;
 }
 
 const typeScriptProjectId = "cf7ac146-d525-443c-b23c-0d58337efebc";
@@ -400,17 +378,19 @@ const commands = new Map<RegExp, Command>()
         /* prOnly */ undefined,
         /* tsgoAllowed */ true,
     ))
-    .set(/run dt/, createPrSnapshotCommand(async (request) => {
+    .set(/run dt/, createPrSnapshotCommand((request) => {
         assert(request.prSnapshot);
-        return queueBuild({
-            definitionId: 23,
-            sourceBranch: `refs/pull/${request.issueNumber}/merge`,
-            prSnapshot: request.prSnapshot,
+        return createPipelineRun({
+            definitionId: 79,
+            repositories: {
+                TypeScript: {
+                    refName: `refs/pull/${request.issueNumber}/merge`,
+                    version: request.prSnapshot.mergeSha,
+                },
+            },
             info: request,
-            inputs: {
-                DT_SHA: await getDefinitelyTypedMasterSha()
-            }
-        })
+            inputs: createPrSnapshotParameters(request),
+        });
     }))
     .set(/user test this(?: inline)?(?! slower)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
