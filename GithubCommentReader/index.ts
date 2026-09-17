@@ -403,7 +403,7 @@ const commands = new Map<RegExp, Command>()
     .set(/run dt/, createPrSnapshotCommand(async (request) => {
         assert(request.prSnapshot);
         return createPipelineRun({
-            definitionId: 0, // TODO: Replace with the DefinitelyTyped-tools pipeline definition ID.
+            definitionId: 79,
             repositories: {
                 TypeScript: {
                     refName: `refs/pull/${request.issueNumber}/merge`,
