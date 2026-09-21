@@ -14,6 +14,9 @@ env:
   STORAGE_CONTAINER_NAME: deployment
   FUNCTION_ZIP_NAME: function.zip
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash
