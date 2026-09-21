@@ -7,7 +7,7 @@
   "main": "dist/GithubCommentReader/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 0"
+    "test": "node --test dist/GithubCommentReader/*.test.js"
   },
   "author": "",
   "license": "SEE LICENSE IN ASSOCIATED REPO",

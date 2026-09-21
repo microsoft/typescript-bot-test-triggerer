@@ -7,6 +7,7 @@ import { ManagedIdentityCredential } from "@azure/identity";
 import { CryptographyClient } from "@azure/keyvault-keys";
 import type { WebhookEvent } from "@octokit/webhooks-types";
 import { createGitHubAppAuth, PermissionLevel } from "./github-app-auth.js";
+import { createPrSnapshot, isPrQuietPeriodActive, type PrSnapshot } from "./pr-snapshot.js";
 
 const refreshWindowMs = 1000 * 60 * 5;
 
@@ -115,12 +116,6 @@ async function sleep(ms: number): Promise<void> {
 }
 
 type PR = Awaited<ReturnType<Octokit["rest"]["pulls"]["get"]>>["data"] | undefined;
-
-interface PrSnapshot {
-    headSha: string;
-    baseSha: string;
-    mergeSha: string;
-}
 
 interface UnresolvedGitHubRun {
     kind: "unresolvedGitHub";
@@ -804,7 +799,8 @@ async function webhook(params: WebhookParams) {
                 ref: mergeSha,
             })).data;
             const parentShas = mergeCommit.parents.map((parent) => parent.sha);
-            if (parentShas[0] !== pr.base.sha || parentShas[1] !== pr.head.sha) {
+            prSnapshot = createPrSnapshot(pr.head.sha, mergeSha, parentShas);
+            if (!prSnapshot) {
                 await cli.issues.createComment({
                     owner: "microsoft",
                     repo: params.repo,
@@ -816,10 +812,9 @@ async function webhook(params: WebhookParams) {
 
             const mergeCreatedAt = mergeCommit.commit.committer?.date;
             assert(mergeCreatedAt, "GitHub did not return a merge commit date");
-            const quietForMs = new Date(params.commentCreatedAt).getTime() - new Date(mergeCreatedAt).getTime();
             const prAuthorIsTeamMember = pr.user.login === params.commentUser
                 || await isTypeScriptTeamMember(cli, pr.user.login);
-            if (!prAuthorIsTeamMember && quietForMs < prQuietPeriodMs) {
+            if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prAuthorIsTeamMember, prQuietPeriodMs)) {
                 await cli.issues.createComment({
                     owner: "microsoft",
                     repo: params.repo,
@@ -828,12 +823,6 @@ async function webhook(params: WebhookParams) {
                 });
                 return;
             }
-
-            prSnapshot = {
-                headSha: pr.head.sha,
-                baseSha: pr.base.sha,
-                mergeSha,
-            };
         }
     }
 
