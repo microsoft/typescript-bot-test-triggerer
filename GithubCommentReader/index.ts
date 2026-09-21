@@ -5,11 +5,18 @@ import vsts from "azure-devops-node-api";
 import assert from "assert";
 import { ManagedIdentityCredential } from "@azure/identity";
 import { CryptographyClient } from "@azure/keyvault-keys";
-import type { WebhookEvent } from "@octokit/webhooks-types";
+import type { operations } from "@octokit/openapi-webhooks-types";
 import { createGitHubAppAuth, PermissionLevel } from "./github-app-auth.js";
 import { createPrSnapshot, isPrQuietPeriodActive, type PrSnapshot } from "./pr-snapshot.js";
 
 const refreshWindowMs = 1000 * 60 * 5;
+
+type WebhookEvent = {
+    [Operation in keyof operations]:
+        operations[Operation] extends {
+            requestBody: { content: { "application/json": infer Event } };
+        } ? Event : never;
+}[keyof operations];
 
 // We cache the clients below this way if a single comment executes two commands, we only bother creating the client once.
 interface Clients {
@@ -602,7 +609,6 @@ const commands = new Map<RegExp, Command>()
     }, undefined, false))
     .set(/(auto)?fix this/, createCommand(async (request) => {
         assert(request.pr);
-        assert(request.pr.head);
         if (request.pr.head.repo?.fork || request.pr.head.repo?.full_name != "microsoft/TypeScript") {
             return {
                 kind: "error",
@@ -770,6 +776,15 @@ async function webhook(params: WebhookParams) {
     if (params.isPr) {
         pr = (await cli.pulls.get({ pull_number: params.issueNumber, owner: "microsoft", repo: params.repo })).data;
 
+        const reportPrChanged = async () => {
+            await cli.issues.createComment({
+                owner: "microsoft",
+                repo: params.repo,
+                issue_number: params.issueNumber,
+                body: `Hey @${params.commentUser}, this PR changed while I was preparing the test run. Please try again.`,
+            });
+        };
+
         if (!pr.merged && pr.mergeable !== true) {
             await cli.issues.createComment({
                 owner: "microsoft",
@@ -792,7 +807,10 @@ async function webhook(params: WebhookParams) {
             }
 
             const mergeSha = pr.merge_commit_sha;
-            assert(mergeSha, "GitHub did not return a merge commit");
+            if (!mergeSha) {
+                await reportPrChanged();
+                return;
+            }
             const mergeCommit = (await cli.repos.getCommit({
                 owner: "microsoft",
                 repo: params.repo,
@@ -801,17 +819,15 @@ async function webhook(params: WebhookParams) {
             const parentShas = mergeCommit.parents.map((parent) => parent.sha);
             prSnapshot = createPrSnapshot(pr.head.sha, mergeSha, parentShas);
             if (!prSnapshot) {
-                await cli.issues.createComment({
-                    owner: "microsoft",
-                    repo: params.repo,
-                    issue_number: params.issueNumber,
-                    body: `Hey @${params.commentUser}, this PR changed while I was preparing the test run. Please try again.`,
-                });
+                await reportPrChanged();
                 return;
             }
 
             const mergeCreatedAt = mergeCommit.commit.committer?.date;
-            assert(mergeCreatedAt, "GitHub did not return a merge commit date");
+            if (!mergeCreatedAt) {
+                await reportPrChanged();
+                return;
+            }
             const prAuthorIsTeamMember = pr.user.login === params.commentUser
                 || await isTypeScriptTeamMember(cli, pr.user.login);
             if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prAuthorIsTeamMember, prQuietPeriodMs)) {
@@ -887,7 +903,10 @@ ${commandInfos.map(({ name, distinctId }) =>
 
         const originalBody = comment.data.body;
         let body = comment.data.body;
-        assert(body);
+        if (!body) {
+            log("Status comment has no body");
+            return;
+        }
 
         for (const run of startedRuns) {
             const toReplace = getStatusPlaceholder(run.distinctId);
@@ -989,9 +1008,16 @@ const handler: HttpHandler = async function (request, context) {
     const commentIsFromIssue = "comment" in event;
     const comment = commentIsFromIssue ? event.comment : event.review;
     const commentCreatedAt = commentIsFromIssue ? event.comment.created_at : event.review.submitted_at;
-    assert(commentCreatedAt, "Comment creation date is missing");
+    if (!commentCreatedAt) {
+        context.log("No comment creation date")
+        return {};
+    }
     if (!comment.body) {
         context.log("No comment body")
+        return {};
+    }
+    if (!comment.user) {
+        context.log("No comment user")
         return {};
     }
 
