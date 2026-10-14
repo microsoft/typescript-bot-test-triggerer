@@ -151,29 +151,26 @@ interface RequestInfo {
     statusCommentId: number; // TODO(jakebailey): rename this
     owner: string;
     repo: string;
-    tsgo: boolean;
 }
 type CommandFn = (request: RequestInfo) => Promise<Run>;
 type CommandDisplayName = (name: string, match: RegExpExecArray) => string;
 interface Command {
     fn: CommandFn;
     prOnly: boolean;
-    tsgoAllowed: boolean;
     requiresPrSnapshot: boolean;
     displayName?: CommandDisplayName;
 }
 
 interface CommandOptions {
     prOnly: boolean;
-    tsgoAllowed?: boolean;
     displayName?: CommandDisplayName;
 }
 
 function createCommand(
     fn: CommandFn,
-    { prOnly, tsgoAllowed = false, displayName }: CommandOptions,
+    { prOnly, displayName }: CommandOptions,
 ): Command {
-    return { fn, prOnly, tsgoAllowed, requiresPrSnapshot: false, displayName };
+    return { fn, prOnly, requiresPrSnapshot: false, displayName };
 }
 
 function createPrSnapshotCommand(
@@ -360,12 +357,7 @@ const commands = new Map<RegExp, Command>()
         assert(request.prSnapshot);
         return createPipelineRun({
             definitionId: 69,
-            repositories: request.tsgo ? {
-                "typescript-go": {
-                    refName: `refs/pull/${request.issueNumber}/merge`,
-                    version: request.prSnapshot.mergeSha,
-                }
-            } : {
+            repositories: {
                 TypeScript: {
                     refName: `refs/pull/${request.issueNumber}/merge`,
                     version: request.prSnapshot.mergeSha,
@@ -375,10 +367,9 @@ const commands = new Map<RegExp, Command>()
             inputs: {
                 ...createPrSnapshotParameters(request),
                 tsperf_preset: request.match[1] || "regular",
-                ts_go: request.tsgo ? "true" : "false",
             }
         })
-    }, { prOnly: true, tsgoAllowed: true }))
+    }, { prOnly: true }))
     .set(/run dt/, createPrSnapshotCommand((request) => {
         assert(request.prSnapshot);
         return createPipelineRun({
@@ -435,7 +426,7 @@ const commands = new Map<RegExp, Command>()
                 repo_count: `${getTopRepoCount(request.match[1])}`,
             }
         })
-    }, { prOnly: true, tsgoAllowed: true, displayName: getTopRepoDisplayName }))
+    }, { prOnly: true, displayName: getTopRepoDisplayName }))
     .set(/test tsserver top(\d+)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
@@ -452,7 +443,7 @@ const commands = new Map<RegExp, Command>()
                 prng_seed: `${request.pr.id}`,
             }
         })
-    }, { prOnly: true, tsgoAllowed: true, displayName: getTopRepoDisplayName }))
+    }, { prOnly: true, displayName: getTopRepoDisplayName }))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
         assert(request.pr);
         if (!request.pr.merged || !request.pr.merge_commit_sha) {
@@ -677,16 +668,8 @@ interface WebhookParams {
 
 const prQuietPeriodMs = 2 * 60 * 1000;
 
-export function getApplicableCommands(isPr: boolean, tsgo: boolean) {
-    return Array.from(commands.entries()).filter(([, command]) => {
-        if (!isPr && command.prOnly) {
-            return false;
-        }
-        if (tsgo && !command.tsgoAllowed) {
-            return false;
-        }
-        return true;
-    });
+export function getApplicableCommands(isPr: boolean) {
+    return Array.from(commands.entries()).filter(([, command]) => isPr || !command.prOnly);
 }
 
 async function webhook(params: WebhookParams) {
@@ -708,8 +691,7 @@ async function webhook(params: WebhookParams) {
     }
     lines = [...new Set(lines)];
 
-    const tsgo = params.repo.includes("typescript-go")
-    const applicableCommands = getApplicableCommands(params.isPr, tsgo);
+    const applicableCommands = getApplicableCommands(params.isPr);
 
     if (applicableCommands.length === 0) {
         log("No applicable commands");
@@ -878,7 +860,6 @@ ${commandInfos.map(({ name, distinctId }) =>
                 log: log,
                 owner: "microsoft",
                 repo: params.repo,
-                tsgo,
             });
         } catch (e) {
             // TODO: short error message
