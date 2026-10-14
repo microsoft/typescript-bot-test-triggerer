@@ -7,7 +7,7 @@ import { ManagedIdentityCredential } from "@azure/identity";
 import { CryptographyClient } from "@azure/keyvault-keys";
 import type { operations } from "@octokit/openapi-webhooks-types";
 import { createGitHubAppAuth, PermissionLevel } from "./github-app-auth.js";
-import { createPrSnapshot, isPrQuietPeriodActive, type PrSnapshot } from "./pr-snapshot.js";
+import { createPrSnapshot, getCopilotPrInitiator, isPrQuietPeriodActive, type PrSnapshot } from "./pr-snapshot.js";
 
 const refreshWindowMs = 1000 * 60 * 5;
 
@@ -831,13 +831,27 @@ async function webhook(params: WebhookParams) {
             const prAuthorIsTeamMember = pr.user.login === params.commentUser
                 || await isTypeScriptTeamMember(cli, pr.user.login);
             if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prAuthorIsTeamMember, prQuietPeriodMs)) {
-                await cli.issues.createComment({
+                const initiator = await getCopilotPrInitiator(pr.user.id, (page) => cli.issues.listEvents({
                     owner: "microsoft",
                     repo: params.repo,
                     issue_number: params.issueNumber,
-                    body: `Hey @${params.commentUser}, this PR was updated less than two minutes before this command. Please wait until it has been unchanged for two minutes and try again.`,
-                });
-                return;
+                    per_page: 100,
+                    page,
+                }));
+                const initiatorIsTeamMember = initiator !== undefined
+                    && (initiator === params.commentUser || await isTypeScriptTeamMember(cli, initiator));
+                log(initiator
+                    ? `Agent PR initiated by ${initiator}; active TypeScript team member: ${initiatorIsTeamMember}`
+                    : `No verified agent PR initiator for author ${pr.user.login}; retaining the quiet period`);
+                if (!initiatorIsTeamMember) {
+                    await cli.issues.createComment({
+                        owner: "microsoft",
+                        repo: params.repo,
+                        issue_number: params.issueNumber,
+                        body: `Hey @${params.commentUser}, this PR was updated less than two minutes before this command. Please wait until it has been unchanged for two minutes and try again.`,
+                    });
+                    return;
+                }
             }
         }
     }
