@@ -151,34 +151,33 @@ interface RequestInfo {
     statusCommentId: number; // TODO(jakebailey): rename this
     owner: string;
     repo: string;
-    tsgo: boolean;
 }
 type CommandFn = (request: RequestInfo) => Promise<Run>;
 type CommandDisplayName = (name: string, match: RegExpExecArray) => string;
 interface Command {
     fn: CommandFn;
     prOnly: boolean;
-    tsgoAllowed: boolean;
     requiresPrSnapshot: boolean;
+    displayName?: CommandDisplayName;
+}
+
+interface CommandOptions {
+    prOnly: boolean;
     displayName?: CommandDisplayName;
 }
 
 function createCommand(
     fn: CommandFn,
-    prOnly = true,
-    tsgoAllowed = false,
-    displayName?: CommandDisplayName,
+    { prOnly, displayName }: CommandOptions,
 ): Command {
-    return { fn, prOnly, tsgoAllowed, requiresPrSnapshot: false, displayName };
+    return { fn, prOnly, requiresPrSnapshot: false, displayName };
 }
 
 function createPrSnapshotCommand(
     fn: CommandFn,
-    prOnly = true,
-    tsgoAllowed = false,
-    displayName?: CommandDisplayName,
+    options: CommandOptions,
 ): Command {
-    return { ...createCommand(fn, prOnly, tsgoAllowed, displayName), requiresPrSnapshot: true };
+    return { ...createCommand(fn, options), requiresPrSnapshot: true };
 }
 
 const topRepoCountLimit = 1000;
@@ -353,17 +352,12 @@ const commands = new Map<RegExp, Command>()
             info: request,
             inputs: {}
         })
-    }))
+    }, { prOnly: true }))
     .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createPrSnapshotCommand((request) => {
         assert(request.prSnapshot);
         return createPipelineRun({
             definitionId: 69,
-            repositories: request.tsgo ? {
-                "typescript-go": {
-                    refName: `refs/pull/${request.issueNumber}/merge`,
-                    version: request.prSnapshot.mergeSha,
-                }
-            } : {
+            repositories: {
                 TypeScript: {
                     refName: `refs/pull/${request.issueNumber}/merge`,
                     version: request.prSnapshot.mergeSha,
@@ -373,13 +367,9 @@ const commands = new Map<RegExp, Command>()
             inputs: {
                 ...createPrSnapshotParameters(request),
                 tsperf_preset: request.match[1] || "regular",
-                ts_go: request.tsgo ? "true" : "false",
             }
         })
-    },
-        /* prOnly */ undefined,
-        /* tsgoAllowed */ true,
-    ))
+    }, { prOnly: true }))
     .set(/run dt/, createPrSnapshotCommand((request) => {
         assert(request.prSnapshot);
         return createPipelineRun({
@@ -393,7 +383,7 @@ const commands = new Map<RegExp, Command>()
             info: request,
             inputs: createPrSnapshotParameters(request),
         });
-    }))
+    }, { prOnly: true }))
     .set(/user test this(?: inline)?(?! slower)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
@@ -406,7 +396,7 @@ const commands = new Map<RegExp, Command>()
                 old_head_ref: request.pr.base.ref
             }
         })
-    }))
+    }, { prOnly: true }))
     .set(/user test tsserver/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
@@ -421,7 +411,7 @@ const commands = new Map<RegExp, Command>()
                 prng_seed: `${request.pr.id}`,
             }
         })
-    }))
+    }, { prOnly: true }))
     .set(/test top(\d+)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
@@ -436,11 +426,7 @@ const commands = new Map<RegExp, Command>()
                 repo_count: `${getTopRepoCount(request.match[1])}`,
             }
         })
-    },
-        /* prOnly */ undefined,
-        /* tsgoAllowed */ true,
-        getTopRepoDisplayName,
-    ))
+    }, { prOnly: true, displayName: getTopRepoDisplayName }))
     .set(/test tsserver top(\d+)/, createPrSnapshotCommand(async (request) => {
         assert(request.pr);
         return createPipelineRun({
@@ -457,11 +443,7 @@ const commands = new Map<RegExp, Command>()
                 prng_seed: `${request.pr.id}`,
             }
         })
-    },
-        /* prOnly */ undefined,
-        /* tsgoAllowed */ true,
-        getTopRepoDisplayName,
-    ))
+    }, { prOnly: true, displayName: getTopRepoDisplayName }))
     .set(/cherry-?pick (?:this )?(?:in)?to (\S+)?/, createCommand(async (request) => {
         assert(request.pr);
         if (!request.pr.merged || !request.pr.merge_commit_sha) {
@@ -498,7 +480,7 @@ const commands = new Map<RegExp, Command>()
                 target_branch: targetBranch,
             }
         })
-    }))
+    }, { prOnly: true }))
     .set(/create release-([\d\.]+)/, createCommand(async (request) => {
         const targetBranch = `release-${request.match[1]}`;
         let targetBranchExists = false;
@@ -529,7 +511,7 @@ const commands = new Map<RegExp, Command>()
                 branch_name: targetBranch
             }
         })
-    }, undefined, false))
+    }, { prOnly: false }))
     .set(/bump release-([\d\.]+)/, createCommand(async (request) => {
         const cli = await getGHClient(request.repo);
         const targetBranch = `release-${request.match[1]}`;
@@ -587,7 +569,7 @@ const commands = new Map<RegExp, Command>()
                 branch_name: targetBranch
             }
         })
-    }, undefined, false))
+    }, { prOnly: false }))
     .set(/sync release-([\d\.]+)/, createCommand(async (request) => {
         const branch = `release-${request.match[1]}`;
         return createWorkflowDispatch({
@@ -597,7 +579,7 @@ const commands = new Map<RegExp, Command>()
                 branch_name: branch
             }
         })
-    }, undefined, false))
+    }, { prOnly: false }))
     .set(/run repros/, createCommand(async (request) => {
         return createWorkflowDispatch({
             workflowId: "run-twoslash-repros.yaml",
@@ -606,7 +588,7 @@ const commands = new Map<RegExp, Command>()
                 number: `${request.issueNumber}`
             }
         })
-    }, undefined, false))
+    }, { prOnly: false }))
     .set(/(auto)?fix this/, createCommand(async (request) => {
         assert(request.pr);
         if (request.pr.head.repo?.fork || request.pr.head.repo?.full_name != "microsoft/TypeScript") {
@@ -628,7 +610,7 @@ const commands = new Map<RegExp, Command>()
             kind: "unresolvedGitHub",
             distinctId: request.distinctId
         }
-    }))
+    }, { prOnly: true }))
 
 const botCalls = ["@typescript-bot", "@typescript-automation"];
 
@@ -686,6 +668,10 @@ interface WebhookParams {
 
 const prQuietPeriodMs = 2 * 60 * 1000;
 
+export function getApplicableCommands(isPr: boolean) {
+    return Array.from(commands.entries()).filter(([, command]) => isPr || !command.prOnly);
+}
+
 async function webhook(params: WebhookParams) {
     const log = params.log;
     const cli = await getGHClient(params.repo);
@@ -705,16 +691,7 @@ async function webhook(params: WebhookParams) {
     }
     lines = [...new Set(lines)];
 
-    const tsgo = params.repo.includes("typescript-go")
-    const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
-        if (!params.isPr && command.prOnly) {
-            return false;
-        }
-        if (tsgo && !command.tsgoAllowed) {
-            return false;
-        }
-        return true;
-    });
+    const applicableCommands = getApplicableCommands(params.isPr);
 
     if (applicableCommands.length === 0) {
         log("No applicable commands");
@@ -883,7 +860,6 @@ ${commandInfos.map(({ name, distinctId }) =>
                 log: log,
                 owner: "microsoft",
                 repo: params.repo,
-                tsgo,
             });
         } catch (e) {
             // TODO: short error message
