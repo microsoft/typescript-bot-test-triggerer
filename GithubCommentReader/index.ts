@@ -529,7 +529,7 @@ const commands = new Map<RegExp, Command>()
                 branch_name: targetBranch
             }
         })
-    }, undefined, false))
+    }, /* prOnly */ false))
     .set(/bump release-([\d\.]+)/, createCommand(async (request) => {
         const cli = await getGHClient(request.repo);
         const targetBranch = `release-${request.match[1]}`;
@@ -587,7 +587,7 @@ const commands = new Map<RegExp, Command>()
                 branch_name: targetBranch
             }
         })
-    }, undefined, false))
+    }, /* prOnly */ false))
     .set(/sync release-([\d\.]+)/, createCommand(async (request) => {
         const branch = `release-${request.match[1]}`;
         return createWorkflowDispatch({
@@ -597,7 +597,7 @@ const commands = new Map<RegExp, Command>()
                 branch_name: branch
             }
         })
-    }, undefined, false))
+    }, /* prOnly */ false))
     .set(/run repros/, createCommand(async (request) => {
         return createWorkflowDispatch({
             workflowId: "run-twoslash-repros.yaml",
@@ -606,7 +606,7 @@ const commands = new Map<RegExp, Command>()
                 number: `${request.issueNumber}`
             }
         })
-    }, undefined, false))
+    }, /* prOnly */ false))
     .set(/(auto)?fix this/, createCommand(async (request) => {
         assert(request.pr);
         if (request.pr.head.repo?.fork || request.pr.head.repo?.full_name != "microsoft/TypeScript") {
@@ -686,6 +686,18 @@ interface WebhookParams {
 
 const prQuietPeriodMs = 2 * 60 * 1000;
 
+export function getApplicableCommands(isPr: boolean, tsgo: boolean) {
+    return Array.from(commands.entries()).filter(([, command]) => {
+        if (!isPr && command.prOnly) {
+            return false;
+        }
+        if (tsgo && !command.tsgoAllowed) {
+            return false;
+        }
+        return true;
+    });
+}
+
 async function webhook(params: WebhookParams) {
     const log = params.log;
     const cli = await getGHClient(params.repo);
@@ -706,15 +718,7 @@ async function webhook(params: WebhookParams) {
     lines = [...new Set(lines)];
 
     const tsgo = params.repo.includes("typescript-go")
-    const applicableCommands = Array.from(commands.entries()).filter(([, command]) => {
-        if (!params.isPr && command.prOnly) {
-            return false;
-        }
-        if (tsgo && !command.tsgoAllowed) {
-            return false;
-        }
-        return true;
-    });
+    const applicableCommands = getApplicableCommands(params.isPr, tsgo);
 
     if (applicableCommands.length === 0) {
         log("No applicable commands");
