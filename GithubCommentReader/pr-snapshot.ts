@@ -25,8 +25,9 @@ export function isPrQuietPeriodActive(
     mergeCreatedAt: string,
     prAuthorIsTeamMember: boolean,
     quietPeriodMs: number,
+    prIsFromSameRepository = false,
 ): boolean {
-    if (prAuthorIsTeamMember) {
+    if (prIsFromSameRepository || prAuthorIsTeamMember) {
         return false;
     }
 

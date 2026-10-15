@@ -33,14 +33,41 @@ test("exempts team-authored PRs from the quiet period", () => {
     );
 });
 
-test("retains the quiet period for other PRs", () => {
+test("exempts same-repository PRs regardless of author", () => {
     assert.equal(
         isPrQuietPeriodActive(
             "2026-09-21T18:06:55Z",
             "2026-09-21T18:06:00Z",
             false,
             2 * 60 * 1000,
+            true,
+        ),
+        false,
+    );
+});
+
+test("retains the quiet period for non-team fork PRs", () => {
+    assert.equal(
+        isPrQuietPeriodActive(
+            "2026-09-21T18:06:55Z",
+            "2026-09-21T18:06:00Z",
+            false,
+            2 * 60 * 1000,
+            false,
         ),
         true,
+    );
+});
+
+test("allows non-team fork PRs after the quiet period", () => {
+    assert.equal(
+        isPrQuietPeriodActive(
+            "2026-09-21T18:08:00Z",
+            "2026-09-21T18:06:00Z",
+            false,
+            2 * 60 * 1000,
+            false,
+        ),
+        false,
     );
 });

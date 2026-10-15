@@ -805,9 +805,10 @@ async function webhook(params: WebhookParams) {
                 await reportPrChanged();
                 return;
             }
-            const prAuthorIsTeamMember = pr.user.login === params.commentUser
-                || await isTypeScriptTeamMember(cli, pr.user.login);
-            if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prAuthorIsTeamMember, prQuietPeriodMs)) {
+            const prIsFromSameRepository = pr.head.repo?.id === pr.base.repo.id;
+            const prIsTeamAuthoredFork = !prIsFromSameRepository
+                && (pr.user.login === params.commentUser || await isTypeScriptTeamMember(cli, pr.user.login));
+            if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prIsTeamAuthoredFork, prQuietPeriodMs, prIsFromSameRepository)) {
                 await cli.issues.createComment({
                     owner: "microsoft",
                     repo: params.repo,
