@@ -7,7 +7,7 @@ import { ManagedIdentityCredential } from "@azure/identity";
 import { CryptographyClient } from "@azure/keyvault-keys";
 import type { operations } from "@octokit/openapi-webhooks-types";
 import { createGitHubAppAuth, PermissionLevel } from "./github-app-auth.js";
-import { createPrSnapshot, getCopilotPrInitiator, isPrQuietPeriodActive, type PrSnapshot } from "./pr-snapshot.js";
+import { createPrSnapshot, isPrQuietPeriodActive, type PrSnapshot } from "./pr-snapshot.js";
 
 const refreshWindowMs = 1000 * 60 * 5;
 
@@ -828,30 +828,17 @@ async function webhook(params: WebhookParams) {
                 await reportPrChanged();
                 return;
             }
-            const prAuthorIsTeamMember = pr.user.login === params.commentUser
-                || await isTypeScriptTeamMember(cli, pr.user.login);
-            if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prAuthorIsTeamMember, prQuietPeriodMs)) {
-                const initiator = await getCopilotPrInitiator(pr.user.id, (page) => cli.issues.listEvents({
+            const prIsFromSameRepository = pr.head.repo?.id === pr.base.repo.id;
+            const prAuthorIsTeamMember = !prIsFromSameRepository
+                && (pr.user.login === params.commentUser || await isTypeScriptTeamMember(cli, pr.user.login));
+            if (isPrQuietPeriodActive(params.commentCreatedAt, mergeCreatedAt, prAuthorIsTeamMember, prQuietPeriodMs, prIsFromSameRepository)) {
+                await cli.issues.createComment({
                     owner: "microsoft",
                     repo: params.repo,
                     issue_number: params.issueNumber,
-                    per_page: 100,
-                    page,
-                }));
-                const initiatorIsTeamMember = initiator !== undefined
-                    && (initiator === params.commentUser || await isTypeScriptTeamMember(cli, initiator));
-                log(initiator
-                    ? `Agent PR initiated by ${initiator}; active TypeScript team member: ${initiatorIsTeamMember}`
-                    : `No verified agent PR initiator for author ${pr.user.login}; retaining the quiet period`);
-                if (!initiatorIsTeamMember) {
-                    await cli.issues.createComment({
-                        owner: "microsoft",
-                        repo: params.repo,
-                        issue_number: params.issueNumber,
-                        body: `Hey @${params.commentUser}, this PR was updated less than two minutes before this command. Please wait until it has been unchanged for two minutes and try again.`,
-                    });
-                    return;
-                }
+                    body: `Hey @${params.commentUser}, this PR was updated less than two minutes before this command. Please wait until it has been unchanged for two minutes and try again.`,
+                });
+                return;
             }
         }
     }
