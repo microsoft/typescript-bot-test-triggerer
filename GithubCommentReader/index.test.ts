@@ -40,7 +40,7 @@ for (const isPr of [false, true]) {
             .map(({ text }) => text);
         assert.deepEqual(actual, expected);
         assert.equal(
-            commands.filter(([pattern]) => pattern.test("API perf test this")).length,
+            commands.filter(([pattern]) => pattern.test("perf test this api")).length,
             isPr ? 1 : 0,
         );
     });
