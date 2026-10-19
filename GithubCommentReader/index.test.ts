@@ -39,5 +39,9 @@ for (const isPr of [false, true]) {
             .filter(({ prOnly }) => isPr || !prOnly)
             .map(({ text }) => text);
         assert.deepEqual(actual, expected);
+        assert.equal(
+            commands.filter(([pattern]) => pattern.test("API perf test this")).length,
+            isPr ? 1 : 0,
+        );
     });
 }

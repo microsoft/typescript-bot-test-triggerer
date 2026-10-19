@@ -353,7 +353,7 @@ const commands = new Map<RegExp, Command>()
             inputs: {}
         })
     }, { prOnly: true }))
-    .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createPrSnapshotCommand((request) => {
+    .set(/(?:([Aa][Pp][Ii]) |(?:new )?)perf test(?: this)?(?: (.+)?)?/, createPrSnapshotCommand((request) => {
         assert(request.prSnapshot);
         return createPipelineRun({
             definitionId: 69,
@@ -366,7 +366,7 @@ const commands = new Map<RegExp, Command>()
             info: request,
             inputs: {
                 ...createPrSnapshotParameters(request),
-                tsperf_preset: request.match[1] || "regular",
+                tsperf_preset: request.match[1] ? "api" : request.match[2] || "regular",
             }
         })
     }, { prOnly: true }))
