@@ -962,15 +962,14 @@ ${commandInfos.map(({ name, distinctId }) =>
 // validated and process the comment in the background. The Functions host no
 // longer tracks the invocation at that point, so context.log can't be used;
 // console output still reaches Application Insights.
-const inFlight = new Map<string, { description: string; start: number; }>();
+const inFlight = new Map<string, { description: string; start: number; promise: Promise<void>; }>();
 
 function processInBackground(deliveryId: string, description: string, params: Omit<WebhookParams, "log">) {
     const log = (s: string) => console.log(`[${deliveryId}] ${s}`);
     const start = Date.now();
-    inFlight.set(deliveryId, { description, start });
     log(`Processing ${description}`);
 
-    webhook({ ...params, log }).then(
+    const promise = webhook({ ...params, log }).then(
         () => "succeeded",
         (e) => {
             console.error(`[${deliveryId}] Error processing comment: ${e instanceof Error ? e.stack : e}`);
@@ -980,13 +979,17 @@ function processInBackground(deliveryId: string, description: string, params: Om
         inFlight.delete(deliveryId);
         log(`Processing ${outcome} after ${Date.now() - start}ms`);
     });
+    inFlight.set(deliveryId, { description, start, promise });
 }
 
-app.hook.appTerminate(() => {
+// The worker waits for this hook before exiting, which gives in-flight work a
+// chance to finish until the host's shutdown grace period runs out.
+app.hook.appTerminate(async () => {
     const now = Date.now();
     for (const [deliveryId, { description, start }] of inFlight) {
         console.error(`[${deliveryId}] Shutting down while still processing ${description} (started ${now - start}ms ago)`);
     }
+    await Promise.all([...inFlight.values()].map(({ promise }) => promise));
 });
 
 const handler: HttpHandler = async function (request, context) {
