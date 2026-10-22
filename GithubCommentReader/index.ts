@@ -848,6 +848,7 @@ ${commandInfos.map(({ name, distinctId }) =>
     const statusCommentId = statusComment.data.id;
 
     log("Starting runs...")
+    const runsStart = Date.now();
     const startedRuns: Run[] = await Promise.all(commandInfos.map(async ({ match, fn, distinctId }) => {
         try {
             return await fn({
@@ -869,7 +870,7 @@ ${commandInfos.map(({ name, distinctId }) =>
         }
     }));
 
-    log("Runs started");
+    log(`Runs started in ${Date.now() - runsStart}ms`);
 
     async function updateComment() {
         const comment = await cli.issues.getComment({
@@ -956,6 +957,41 @@ ${commandInfos.map(({ name, distinctId }) =>
     log("Updated comment with build links");
 }
 
+// GitHub gives up on a webhook delivery after 10 seconds, but starting runs
+// regularly takes longer than that, so we respond as soon as the request is
+// validated and process the comment in the background. The Functions host no
+// longer tracks the invocation at that point, so context.log can't be used;
+// console output still reaches Application Insights.
+const inFlight = new Map<string, { description: string; start: number; promise: Promise<void>; }>();
+
+function processInBackground(deliveryId: string, description: string, params: Omit<WebhookParams, "log">) {
+    const log = (s: string) => console.log(`[${deliveryId}] ${s}`);
+    const start = Date.now();
+    log(`Processing ${description}`);
+
+    const promise = webhook({ ...params, log }).then(
+        () => "succeeded",
+        (e) => {
+            console.error(`[${deliveryId}] Error processing comment: ${e instanceof Error ? e.stack : e}`);
+            return "failed";
+        },
+    ).then((outcome) => {
+        inFlight.delete(deliveryId);
+        log(`Processing ${outcome} after ${Date.now() - start}ms`);
+    });
+    inFlight.set(deliveryId, { description, start, promise });
+}
+
+// The worker waits for this hook before exiting, which gives in-flight work a
+// chance to finish until the host's shutdown grace period runs out.
+app.hook.appTerminate(async () => {
+    const now = Date.now();
+    for (const [deliveryId, { description, start }] of inFlight) {
+        console.error(`[${deliveryId}] Shutting down while still processing ${description} (started ${now - start}ms ago)`);
+    }
+    await Promise.all([...inFlight.values()].map(({ promise }) => promise));
+});
+
 const handler: HttpHandler = async function (request, context) {
     context.log("Received request");
     const body = await request.text();
@@ -1002,33 +1038,23 @@ const handler: HttpHandler = async function (request, context) {
         || !!("issue" in event && event.issue && event.issue.pull_request);
 
     const issueNumber = "issue" in event ? event.issue.number : event.pull_request.number;
-    context.log(`Processing comment ${comment.id} on microsoft/${repoName} ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`)
+    const deliveryId = request.headers.get("x-github-delivery") ?? context.invocationId;
+    const description = `comment ${comment.id} on microsoft/${repoName} ${isPr ? "PR" : "issue"} ${issueNumber} by ${comment.user.login} (${comment.author_association})`;
+    context.log(`Delivery ${deliveryId}: processing ${description} in the background`);
 
-    try {
-        await webhook({
-            // The azure functions logger is a getter and crashes if passed directly
-            log: (s) => context.log(s),
-            issueNumber,
-            commentId: comment.id,
-            commentBody: comment.body,
-            commentCreatedAt,
-            commentCommitId: commentIsFromIssue ? undefined : event.review.commit_id,
-            commentIsFromIssue,
-            isPr,
-            commentUser: comment.user.login,
-            repo: repoName,
-        });
-    } catch (e) {
-        context.log(`Error processing comment: ${e}`);
-        if (e instanceof Error) {
-            context.log(e.stack);
-        }
-        return {
-            status: 500,
-        };
-    }
+    processInBackground(deliveryId, description, {
+        issueNumber,
+        commentId: comment.id,
+        commentBody: comment.body,
+        commentCreatedAt,
+        commentCommitId: commentIsFromIssue ? undefined : event.review.commit_id,
+        commentIsFromIssue,
+        isPr,
+        commentUser: comment.user.login,
+        repo: repoName,
+    });
 
-    return {};
+    return { status: 202 };
 }
 
 app.http('GithubCommentReader', {
