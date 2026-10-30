@@ -2,7 +2,7 @@ name: Sync GitHub webhook IPs
 
 on:
   schedule:
-    - cron: '23 * * * *'
+    - cron: '23 4 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
