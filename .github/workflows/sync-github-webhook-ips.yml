@@ -1,0 +1,101 @@
+name: Sync GitHub webhook IPs
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Show changes without updating the WAF policy
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: sync-github-webhook-ips
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sync:
+    if: github.repository == 'microsoft/typescript-bot-test-triggerer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: azure
+    permissions:
+      id-token: write
+    env:
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+    steps:
+      # The deployment identity has Network Contributor scoped only to
+      # github-webhooks/GitHubWebhookWAF.
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sync the shared webhook allowlist
+        run: |
+          set -euo pipefail
+          : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID is required}"
+          case "$DRY_RUN" in
+            true|false) ;;
+            *) echo "DRY_RUN must be true or false" >&2; exit 1 ;;
+          esac
+
+          hooks=$(curl --fail --silent --show-error --retry 3 --max-time 60 \
+            https://api.github.com/meta | jq -ce '
+              .hooks
+              | if type == "array" and length > 0
+                  and all(.[]; type == "string"
+                    and test("^[0-9a-fA-F:.]+/[1-9][0-9]*$")
+                    and (split("/") | (.[1] | tonumber) <=
+                      (if .[0] | contains(":") then 128 else 32 end)))
+                  and length == (unique | length)
+                then sort
+                else error("Expected a nonempty list of unique webhook CIDR ranges")
+                end')
+          id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/github-webhooks/providers/Microsoft.Network/frontdoorWebApplicationFirewallPolicies/GitHubWebhookWAF"
+          resource_args=(--ids "$id" --api-version 2024-02-01)
+          policy=$(az resource show "${resource_args[@]}" --output json)
+          index=$(jq -er '
+            .properties
+            | if .policySettings.enabledState == "Enabled" and .policySettings.mode == "Prevention"
+              then . else error("WAF policy must be enabled in Prevention mode") end
+            | .customRules.rules | to_entries
+            | map(select(.value.name == "AllowGitHub"))
+            | if length == 1 then .[0] else error("Expected exactly one AllowGitHub rule") end
+            | if (.value | .action == "Allow" and .enabledState == "Enabled"
+                and (.matchConditions | length) == 1
+                and (.matchConditions[0] | .matchVariable == "RemoteAddr"
+                  and .operator == "IPMatch" and .negateCondition == false
+                  and (.matchValue | type == "array" and all(.[]; type == "string"))))
+              then .key else error("Unexpected AllowGitHub rule configuration") end' <<< "$policy")
+          current=$(jq -c --argjson index "$index" \
+            '.properties.customRules.rules[$index].matchConditions[0].matchValue | sort' <<< "$policy")
+          if [[ "$current" == "$hooks" ]]; then
+            echo "GitHubWebhookWAF already matches the GitHub Meta API webhook ranges."
+            exit 0
+          fi
+
+          jq -n --argjson old "$current" --argjson new "$hooks" \
+            '{added: ($new - $old), removed: ($old - $new)}'
+          if [[ "$DRY_RUN" == true ]]; then
+            echo "Dry run: no Azure changes made."
+            exit 0
+          fi
+
+          az resource update "${resource_args[@]}" --output none \
+            --set "properties.customRules.rules[$index].matchConditions[0].matchValue=$hooks"
+          az resource show "${resource_args[@]}" --output json | jq -e --argjson expected "$hooks" '
+            .properties.customRules.rules | map(select(.name == "AllowGitHub"))
+            | if length == 1 and (.[0].matchConditions[0].matchValue | sort) == $expected
+              then true else error("Saved WAF allowlist does not match the GitHub Meta API") end' > /dev/null
+          echo "GitHubWebhookWAF updated and verified."
