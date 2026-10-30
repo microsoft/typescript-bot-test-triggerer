@@ -23,10 +23,7 @@ defaults:
 jobs:
   sync:
     if: github.repository == 'microsoft/typescript-bot-test-triggerer'
-    runs-on:
-      - "self-hosted"
-      - "1ES.Pool=TypeScript-1ES-GitHub-Deploys"
-      - "1ES.ImageOverride=azure-linux-3"
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: azure
     permissions:
