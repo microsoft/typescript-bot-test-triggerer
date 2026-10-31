@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '23 4 * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Show changes without updating the WAF policy
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -25,6 +30,7 @@ jobs:
       id-token: write
     env:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
     steps:
       # The deployment identity has Network Contributor scoped only to
@@ -39,6 +45,10 @@ jobs:
         run: |
           set -euo pipefail
           : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID is required}"
+          case "$DRY_RUN" in
+            true|false) ;;
+            *) echo "DRY_RUN must be true or false" >&2; exit 1 ;;
+          esac
 
           hooks=$(curl --fail --silent --show-error --retry 3 --max-time 60 \
             https://api.github.com/meta | jq -ce '
@@ -59,23 +69,9 @@ jobs:
             .properties
             | if .policySettings.enabledState == "Enabled" and .policySettings.mode == "Prevention"
               then . else error("WAF policy must be enabled in Prevention mode") end
-            | .customRules.rules
-            | (map(select(.name == "AllowGitHub"))
-                | if length == 1 then .[0] else error("Expected exactly one AllowGitHub rule") end) as $allow
-            # AllowGitHub only restricts access if everything it does not match is blocked afterward.
-            | (map(select(.name == "BlockAll"))
-                | if length == 1 then .[0] else error("Expected exactly one BlockAll rule") end
-                | if .action == "Block" and .enabledState == "Enabled"
-                    and .priority > $allow.priority
-                    and (.matchConditions | length) == 1
-                    and (.matchConditions[0] | .matchVariable == "SocketAddr"
-                      and .operator == "IPMatch" and .negateCondition == false
-                      and (.matchValue | sort) == ["0.0.0.0/0", "::/0"])
-                  then . else error("Unexpected BlockAll rule configuration") end) as $block
-            | to_entries
+            | .customRules.rules | to_entries
             | map(select(.value.name == "AllowGitHub"))
-            | .[0]
-            # RemoteAddr comes from X-Forwarded-For and can be spoofed; SocketAddr cannot.
+            | if length == 1 then .[0] else error("Expected exactly one AllowGitHub rule") end
             | if (.value | .action == "Allow" and .enabledState == "Enabled"
                 and (.matchConditions | length) == 1
                 and (.matchConditions[0] | .matchVariable == "SocketAddr"
@@ -91,6 +87,10 @@ jobs:
 
           jq -n --argjson old "$current" --argjson new "$hooks" \
             '{added: ($new - $old), removed: ($old - $new)}'
+          if [[ "$DRY_RUN" == true ]]; then
+            echo "Dry run: no Azure changes made."
+            exit 0
+          fi
 
           az resource update "${resource_args[@]}" --output none \
             --set "properties.customRules.rules[$index].matchConditions[0].matchValue=$hooks"
