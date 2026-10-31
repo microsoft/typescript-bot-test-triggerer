@@ -69,12 +69,26 @@ jobs:
             .properties
             | if .policySettings.enabledState == "Enabled" and .policySettings.mode == "Prevention"
               then . else error("WAF policy must be enabled in Prevention mode") end
-            | .customRules.rules | to_entries
+            | .customRules.rules
+            | (map(select(.name == "AllowGitHub"))
+                | if length == 1 then .[0] else error("Expected exactly one AllowGitHub rule") end) as $allow
+            # AllowGitHub only restricts access if everything it does not match is blocked afterward.
+            | (map(select(.name == "BlockAll"))
+                | if length == 1 then .[0] else error("Expected exactly one BlockAll rule") end
+                | if .action == "Block" and .enabledState == "Enabled"
+                    and .priority > $allow.priority
+                    and (.matchConditions | length) == 1
+                    and (.matchConditions[0] | .matchVariable == "SocketAddr"
+                      and .operator == "IPMatch" and .negateCondition == false
+                      and (.matchValue | sort) == ["0.0.0.0/0", "::/0"])
+                  then . else error("Unexpected BlockAll rule configuration") end) as $block
+            | to_entries
             | map(select(.value.name == "AllowGitHub"))
-            | if length == 1 then .[0] else error("Expected exactly one AllowGitHub rule") end
+            | .[0]
+            # RemoteAddr comes from X-Forwarded-For and can be spoofed; SocketAddr cannot.
             | if (.value | .action == "Allow" and .enabledState == "Enabled"
                 and (.matchConditions | length) == 1
-                and (.matchConditions[0] | .matchVariable == "RemoteAddr"
+                and (.matchConditions[0] | .matchVariable == "SocketAddr"
                   and .operator == "IPMatch" and .negateCondition == false
                   and (.matchValue | type == "array" and all(.[]; type == "string"))))
               then .key else error("Unexpected AllowGitHub rule configuration") end' <<< "$policy")
