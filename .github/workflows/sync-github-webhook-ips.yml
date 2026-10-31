@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '23 4 * * *'
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Show changes without updating the WAF policy
-        type: boolean
-        default: true
 
 permissions: {}
 
@@ -30,7 +25,6 @@ jobs:
       id-token: write
     env:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
     steps:
       # The deployment identity has Network Contributor scoped only to
@@ -45,10 +39,6 @@ jobs:
         run: |
           set -euo pipefail
           : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID is required}"
-          case "$DRY_RUN" in
-            true|false) ;;
-            *) echo "DRY_RUN must be true or false" >&2; exit 1 ;;
-          esac
 
           hooks=$(curl --fail --silent --show-error --retry 3 --max-time 60 \
             https://api.github.com/meta | jq -ce '
@@ -87,10 +77,6 @@ jobs:
 
           jq -n --argjson old "$current" --argjson new "$hooks" \
             '{added: ($new - $old), removed: ($old - $new)}'
-          if [[ "$DRY_RUN" == true ]]; then
-            echo "Dry run: no Azure changes made."
-            exit 0
-          fi
 
           az resource update "${resource_args[@]}" --output none \
             --set "properties.customRules.rules[$index].matchConditions[0].matchValue=$hooks"
