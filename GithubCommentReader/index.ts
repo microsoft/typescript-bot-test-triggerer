@@ -345,12 +345,13 @@ async function createWorkflowDispatch({ workflowId, info, inputs }: CreateWorkfl
 const commands = new Map<RegExp, Command>()
     .set(/pack this/, createPrSnapshotCommand((request) => {
         assert(request.prSnapshot);
-        return queueBuild({
-            definitionId: 19,
-            sourceBranch: `refs/pull/${request.issueNumber}/merge`,
-            prSnapshot: request.prSnapshot,
+        return createWorkflowDispatch({
+            workflowId: "pr-build.yml",
             info: request,
-            inputs: {}
+            inputs: {
+                pr_number: `${request.issueNumber}`,
+                expected_head_sha: request.prSnapshot.headSha,
+            }
         })
     }, { prOnly: true }))
     .set(/(?:new )?perf test(?: this)?(?: (.+)?)?/, createPrSnapshotCommand((request) => {
