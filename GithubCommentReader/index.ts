@@ -192,20 +192,6 @@ function getTopRepoDisplayName(name: string, match: RegExpExecArray) {
     return name.slice(0, match.index) + cappedMatch + name.slice(match.index + match[0].length);
 }
 
-interface BuildVars {
-    definition: {
-        id: number;
-    };
-    project: {
-        id: string;
-    };
-    sourceBranch: string;
-    sourceVersion: string;
-    parameters: string;
-    templateParameters: Record<string, string>;
-    variables: Record<string, { value: string; }>;
-}
-
 function createParameters(info: RequestInfo, inputs: Record<string, string>) {
     const parameters: Record<string, string> = {
         distinct_id: info.distinctId,
@@ -229,44 +215,6 @@ function createPrSnapshotParameters(info: RequestInfo) {
         expected_head_sha: info.prSnapshot.headSha,
         expected_base_sha: info.prSnapshot.baseSha,
         expected_merge_sha: info.prSnapshot.mergeSha,
-    };
-}
-
-/**
- * This queues a build using the legacy AzDO build API.
- */
-interface QueueBuildRequest {
-    definitionId: number;
-    sourceBranch: string;
-    prSnapshot: PrSnapshot;
-    info: RequestInfo;
-    inputs: Record<string, string>;
-}
-
-async function queueBuild({ definitionId, sourceBranch, prSnapshot, info, inputs }: QueueBuildRequest): Promise<ResolvedRun> {
-    const parameters = createParameters(info, inputs);
-
-    const buildParams: BuildVars = {
-        definition: { id: definitionId },
-        project: { id: typeScriptProjectId },
-        sourceBranch, // Undocumented, but used by the official frontend
-        sourceVersion: prSnapshot.mergeSha, // Also undocumented
-        parameters: JSON.stringify(parameters), // This API is real bad
-        templateParameters: parameters,
-        variables: {
-            expected_head_sha: { value: prSnapshot.headSha },
-            expected_base_sha: { value: prSnapshot.baseSha },
-            expected_merge_sha: { value: prSnapshot.mergeSha },
-        },
-    };
-
-    info.log(`Trigger build ${definitionId} on ${info.issueNumber}`);
-    const build = await (await getVSTSTypeScriptClient()).getBuildApi();
-    const response = await build.queueBuild(buildParams, "TypeScript");
-    return {
-        kind: "resolved",
-        distinctId: info.distinctId,
-        url: response._links.web.href,
     };
 }
 
