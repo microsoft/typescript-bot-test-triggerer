@@ -263,6 +263,19 @@ async function createPipelineRun({ definitionId, repositories, info, inputs }: C
 }
 
 /**
+ * Queues the TypeScript release maintenance pipeline on main. The pipeline
+ * checks out and pushes the target branch named in its parameters.
+ */
+function createReleaseMaintenanceRun({ info, inputs }: { info: RequestInfo; inputs: Record<string, string>; }) {
+    return createPipelineRun({
+        definitionId: 84,
+        repositories: { self: { refName: "refs/heads/main" } },
+        info,
+        inputs,
+    });
+}
+
+/**
  * This queues a build using the AzDO Pipelines API.
  */
 interface CreateWorkflowDispatchRequest {
@@ -421,10 +434,10 @@ const commands = new Map<RegExp, Command>()
             }
         }
 
-        return createWorkflowDispatch({
-            workflowId: "create-cherry-pick-pr.yml",
+        return createReleaseMaintenanceRun({
             info: request,
             inputs: {
+                operation: "cherry-pick",
                 pr: `${request.issueNumber}`,
                 target_branch: targetBranch,
             }
@@ -451,10 +464,10 @@ const commands = new Map<RegExp, Command>()
                 error: `Branch \`${targetBranch}\` already exists.`
             }
         }
-        return createWorkflowDispatch({
-            workflowId: "new-release-branch.yaml",
+        return createReleaseMaintenanceRun({
             info: request,
             inputs: {
+                operation: "new-release-branch",
                 package_version: `${request.match[1]}.0-beta`,
                 core_major_minor: request.match[1],
                 branch_name: targetBranch
@@ -509,10 +522,10 @@ const commands = new Map<RegExp, Command>()
         // > X.X.0-beta -> X.X.1-rc -> X.X.2 -> X.X.3
         const new_version = `${majorMinor}.${currentVersion.indexOf("beta") >= 0 ? "1-rc" : currentVersion.indexOf("rc") >= 0 ? "2" : (Number(parts[2]) + 1)}`;
 
-        return createWorkflowDispatch({
-            workflowId: "set-version.yaml",
+        return createReleaseMaintenanceRun({
             info: request,
             inputs: {
+                operation: "set-version",
                 package_version: new_version,
                 core_major_minor: majorMinor,
                 branch_name: targetBranch
@@ -521,10 +534,10 @@ const commands = new Map<RegExp, Command>()
     }, { prOnly: false }))
     .set(/sync release-([\d\.]+)/, createCommand(async (request) => {
         const branch = `release-${request.match[1]}`;
-        return createWorkflowDispatch({
-            workflowId: "sync-branch.yaml",
+        return createReleaseMaintenanceRun({
             info: request,
             inputs: {
+                operation: "sync-branch",
                 branch_name: branch
             }
         })
